@@ -260,6 +260,12 @@
     if(g.stageIndex < g.stages.length-1){ g.stageIndex++; save(); return g; }
     return g;
   }
+  // 删除目标：连同它名下的派生任务一并移除，避免出现孤儿任务
+  function deleteGoal(id){
+    _state.goals = _state.goals.filter(g=>g.id!==id);
+    if(_state.tasks) _state.tasks = _state.tasks.filter(t=>t.goalId!==id);
+    save();
+  }
 
   /* ---------- 随记 / 日记 ---------- */
   function addNote(n){
@@ -286,7 +292,7 @@
     uid, fmtDate, today, shiftDay, weekdayCN, weekdayShort, weekOf, INBOX, isoWeek, weekKey,
     tasksOf, ensureDate, addTask, updateTask, deleteTask, reorder, setDone, onTaskToggled,
     setTaskDate, unscheduled, pushDragLog, dragOutCount, dragInCount, getWeekFocus, setWeekFocus, setWeekSummary,
-    addGoal, getGoal, updateGoal, advanceStage,
+    addGoal, getGoal, updateGoal, advanceStage, deleteGoal,
     addNote, updateNote, addDiary, pushLog,
     KEY
   };
