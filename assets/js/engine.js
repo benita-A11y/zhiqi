@@ -218,9 +218,12 @@
     const dowName = S.weekdayCN[wd];
     const isWeekend = wd===0 || wd===6;
 
-    // —— AI 学习 1：拖拽学习 —— 若这一天历史上总被往外拖（过载），本日少派任务
+    // —— AI 学习 1：拖拽学习 —— 若这一天历史上总被往外拖（过载），本日少派任务；
+    // 若总被拖进来（受欢迎），本日可适当多派一点
     const overload = S.dragOutCount(dateStr);
+    const inflow = S.dragInCount(dateStr);
     let keepRatio = overload>=3 ? 0.5 : overload>=2 ? 0.7 : 1;
+    if(inflow>=2) keepRatio = Math.min(1.2, keepRatio + 0.12);
 
     // —— AI 学习 2：完成率学习 —— 近 7 天完成率低时减量，高时保持/微增
     const recent = last7DoneRate();
