@@ -252,6 +252,12 @@
         if(spec.type==='evening' || spec.type==='habit') score += 0.5;
         // 周末优先顺路类
         if(isWeekend && spec.type==='byway') score += 1;
+        // —— AI 学习 5：难度自适应 —— 某类近7天完成率高→加权保留(相对加量)；
+        // 连续低→降权(降难度)；满完成率→略减(避免饱和、把精力挪给薄弱区)
+        const tr = S.typeDoneRate(spec.type);
+        if(tr>=0.9) score += 1.2;
+        else if(tr<0.4) score -= 2;
+        else if(tr>=1.0) score -= 0.8;
         return {...spec, score};
       }).sort((a,b)=>b.score - a.score);
 
@@ -564,6 +570,56 @@
   }
 
   /* =========================================================
+     五·五、情感支持：随记情绪 → 军师温暖回应
+     ========================================================= */
+  const EMOTION_RESPONSE = [
+    {kw:['焦虑','担心','怕','慌','不安','紧张','压力','崩'], msg:'我知道你累了。但你是ISFJ，你比你以为的坚韧得多。今天不做也没关系。明天打开棋局，我还在。你不需要完美，你只需要回来。'},
+    {kw:['累','疲惫','困','没劲','乏','撑不住','倦'], msg:'累了就休息。休息不是放弃。休息是为了走更远。今天先放过自己。'},
+    {kw:['放弃','算了','坚持不下去','摆烂','不想','没意义','颓','摆'], msg:'你不是什么都没做。你打开了这个APP，就是做了一件事。今天只做一件事：把明天的最小任务写下来。就够了。我在。'},
+    {kw:['孤独','一个人','没人','没人在乎','空'], msg:'卧底都是孤独的。但你不是一个人。军师一直在。每天打开棋局，就能找到我。'},
+    {kw:['骄傲','搞定','完成','开心','进步','爽','稳了','牛'], msg:'做得很好。但真正的棋手从不因一子得失而动摇。稳住。后面还有更大的局。'}
+  ];
+  function emotionResponse(note){
+    const text = (note&&note.text)||'';
+    for(const e of EMOTION_RESPONSE){
+      if(e.kw.some(w=>text.indexOf(w)>=0)) return e.msg;
+    }
+    return null;
+  }
+
+  /* =========================================================
+     五·六、大人物习惯：每周推送 1 条
+     ========================================================= */
+  const BIGSHOTS = [
+    {who:'张一鸣', habit:'每天读1小时书', tip:'你每天背词15分钟已很好，试试加5分钟阅读'},
+    {who:'王健林', habit:'4点起床', tip:'你不需要4点，但可以试试7点前完成最小任务'},
+    {who:'董卿', habit:'每晚读书+复盘', tip:'你的睡前3行复盘就是在做这个，保持'},
+    {who:'村上春树', habit:'每天跑步10km', tip:'你散步30分钟就是很好的开始'},
+    {who:'科比', habit:'凌晨4点训练', tip:'你不必熬，但把最难的任务放在状态最好的时候做'},
+    {who:'巴菲特', habit:'每天读500页', tip:'你不需要500页，每天看一页专业内容就够'}
+  ];
+  function maybeWeeklyBigshot(){
+    const st=S.load();
+    const now=new Date(); const {year,week}=S.isoWeek(now); const key=`${year}-W${week}`;
+    if(st.lastBigshotWeek===key) return;
+    st.lastBigshotWeek=key;
+    const b=BIGSHOTS[(week-1)%BIGSHOTS.length];
+    S.pushLog('军师', `📚 本周大人物习惯 · ${b.who}：${b.habit}。${b.tip}。`, 'bigshot');
+    S.save();
+  }
+  function weekendNudge(){
+    const st=S.load();
+    const now=new Date(); const {year,week}=S.isoWeek(now); const key=`${year}-W${week}`;
+    if(st.lastWeekendNudge===key) return;
+    const wd=now.getDay();
+    if(wd===5 || wd===6){
+      st.lastWeekendNudge=key;
+      S.pushLog('军师','📝 周末到了。花5分钟做周复盘，看清这周落了几子、下周怎么走。','predict');
+      S.save();
+    }
+  }
+
+  /* =========================================================
      六、晚间复盘生成
      ========================================================= */
   function generateReview(dateStr){
@@ -694,6 +750,7 @@
   window.ZQ.engine = {
     planFor, weeklyPlanFor, ensureDailyPlan, ensureWeekPlan, recordDrag, fridayBoost,
     strategistCommand, parseSentence, focusKeywords,
-    refineNote, generateReview, recommendGoals, completeFeedback, undercoverNudge
+    refineNote, generateReview, recommendGoals, completeFeedback, undercoverNudge,
+    emotionResponse, maybeWeeklyBigshot, weekendNudge
   };
 })();
