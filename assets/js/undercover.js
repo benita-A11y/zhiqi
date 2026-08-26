@@ -62,6 +62,17 @@
   function onToggle(task, done){
     if(!done) return; // 只处理"完成"动作
     const st=S.load(); const u=st.undercover;
+    // 预判：连续深夜(23点后/5点前)完成任务 → 提醒早睡
+    if(task.doneAt){
+      const h=new Date(task.doneAt).getHours();
+      if(h>=23 || h<5){
+        u.nightDoneStreak=(u.nightDoneStreak||0)+1;
+        if(u.nightDoneStreak===3) S.pushLog('军师','🌙 你连续3天在深夜落子。明天试着早上先完成最小任务，晚上会轻松很多。','predict');
+      } else {
+        u.nightDoneStreak=0;
+      }
+      S.save();
+    }
     const dateStr = task.date;
     const todays = S.tasksOf(dateStr);
     if(todays.length===0) return;
