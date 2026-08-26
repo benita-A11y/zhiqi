@@ -627,19 +627,19 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 .cal-meta{flex:none;font-size:9px;color:var(--ink-3);display:flex;align-items:center;gap:3px;}
 .cal-meta .dot{width:5px;height:5px;border-radius:50%;}
 
-/* 本周视图卡片内任务：参考计划本/GoalDay 风格，横向单行 + 可见拖拽把手 */
-.week-card .cal-task{align-items:center;padding:3px 5px;gap:3px;margin-bottom:3px;}
-.week-card .cal-task .drag-h{display:inline;flex:none;padding-right:1px;}
-.week-card .cal-task .cal-check{flex:none;margin-top:0;}
+/* 本周视图卡片内任务：参考计划本/GoalDay 风格，横向多行 + 隐藏把手/元信息 */
+.week-card .cal-task{align-items:flex-start;padding:3px 5px;gap:3px;margin-bottom:3px;}
+.week-card .cal-task .drag-h{display:none;}
+.week-card .cal-task .cal-check{flex:none;margin-top:1px;}
 .week-card .cal-task .cal-tt{
   display:block;
   flex:1;
   min-width:0;
-  white-space:nowrap;
+  white-space:normal;
   overflow:hidden;
-  text-overflow:ellipsis;
-  font-size:10.5px;
-  line-height:1.3;
+  max-height:2.5em;
+  font-size:10px;
+  line-height:1.25;
 }
 .week-card .cal-task .cal-meta{display:none;}
 
@@ -681,15 +681,14 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
   .wc-date{font-size:12px;}
   .cal-task{font-size:12px;padding:6px 8px;}
   .cal-check{width:16px;height:16px;}
-  .week-card .cal-task .cal-meta{display:flex;font-size:9px;}
-  .week-card .cal-task .cal-meta .dot{width:4px;height:4px;}
+  .week-card .cal-task .cal-meta{display:none;}
 }
 
-/* 移动端：参考计划本/GoalDay 风格，2 列 × 4 行，本周重点面板置顶左格 */
+/* 移动端：参考计划本 8 分格（2 列 × 4 行），每格等高，文字横向 */
 @media(max-width:640px){
   .week-main{
     grid-template-columns: repeat(2, 1fr);
-    grid-template-rows: auto repeat(4, minmax(0, 1fr));
+    grid-template-rows: repeat(4, minmax(0, 1fr));
     grid-template-areas:
       "focus d1"
       "d2 d3"
@@ -702,26 +701,29 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
   .week-card-placeholder{display:none;}
   .week-focus-panel{
     flex-direction:column;
-    padding:8px;
-    gap:6px;
+    padding:6px;
+    gap:4px;
+    overflow:hidden;
   }
-  .wf-tabs{flex-direction:row;width:auto;flex:none;gap:6px;margin-bottom:4px;}
-  .wf-tab{padding:5px 8px;font-size:10px;}
-  .wf-body{flex:1;min-height:0;}
-  .wf-area{min-height:46px;font-size:10px;padding:6px 8px;}
-  .wf-summary{gap:4px;}
-  .wf-stat{padding:4px 6px;}
-  .wf-stat span{font-size:9px;}
-  .wf-stat b{font-size:11px;}
+  .wf-tabs{flex-direction:row;width:auto;flex:none;gap:4px;margin-bottom:2px;}
+  .wf-tab{padding:3px 6px;font-size:9px;}
+  .wf-body{flex:1;min-height:0;overflow:hidden;}
+  .wf-area{min-height:0;flex:1;font-size:9px;padding:4px 6px;border-radius:8px;}
+  #wf-save, #wf-save-summary{margin-top:3px;padding:5px 0;font-size:9px;}
+  .wf-summary{gap:3px;}
+  .wf-stat{padding:3px 5px;}
+  .wf-stat span{font-size:8px;}
+  .wf-stat b{font-size:10px;}
   .week-card{padding:6px;border-radius:12px;}
-  .wc-head{margin-bottom:4px;gap:3px;}
+  .wc-head{margin-bottom:3px;gap:2px;}
   .wc-head .wc-count{display:none;}
-  .wc-dow{padding:2px 5px;font-size:9px;}
-  .wc-date{font-size:10px;}
-  .wc-add{width:18px;height:18px;font-size:13px;}
-  .cal-task{font-size:10px;padding:4px 5px;}
-  .drag-h{font-size:10px;}
-  .week-card .cal-task{padding:3px 4px;gap:3px;}
-  .week-card .cal-task .cal-check{margin-top:0;}
-  .wf-area{min-height:36px;}
+  .wc-dow{padding:2px 5px;font-size:8px;}
+  .wc-date{font-size:9px;}
+  .wc-add{width:16px;height:16px;font-size:11px;}
+  .cal-task{font-size:9px;padding:3px 4px;margin-bottom:2px;}
+  .drag-h{display:none;}
+  .week-card .cal-task{padding:2px 3px;gap:2px;align-items:flex-start;}
+  .week-card .cal-task .cal-check{width:11px;height:11px;margin-top:1px;}
+  .week-card .cal-task .cal-tt{font-size:9px;line-height:1.2;max-height:2.4em;}
+  .wf-area{min-height:28px;}
 }
