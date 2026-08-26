@@ -83,7 +83,7 @@
       <div class="card mt16">
         <div class="card-title">📝 随手记一笔</div>
         <div class="note-input mt8">
-          <textarea id="quick-note" placeholder="脑海里闪过的念头、情绪、薄弱点…先记下来，军师稍后帮你整理。"></textarea>
+          <textarea id="quick-note" placeholder="闪过脑海的念头、情绪、薄弱点…先记下来，军师帮你整理。"></textarea>
           <button class="btn ghost block" id="quick-note-btn">记下来，军师提炼</button>
         </div>
       </div>
@@ -147,6 +147,7 @@
       const note=S.addNote({text:v});
       const r=E.refineNote(note);
       S.updateNote(note.id,{emotion:r.emotion,points:r.points,taskId:r.taskId,refined:true});
+      const er=E.emotionResponse(note); if(er) S.pushLog('军师', er, 'comfort');
       $('#quick-note').value='';
       toast(r.suggestion||'已记录，军师已提炼');
       renderToday();
@@ -255,8 +256,8 @@
 
     view.innerHTML = `
       <div class="card reco-card">
-        <div class="card-title">🎖️ 军师正在为你下一盘大棋</div>
-        <p class="small muted mt8">你不用想"下一步做什么"——军师已把大目标拆成每天的小任务，做完自动推下一步。下面是推荐给你的新棋局：</p>
+        <div class="card-title">🎖️ 军师已为你布好局</div>
+        <p class="small muted mt8">大目标，军师替你拆成每天的小任务。先做手上的，做完自动推下一步。</p>
         <div class="mt12">${recoHtml}</div>
       </div>
       <button class="btn primary block mb0" id="add-goal-btn">＋ 我要立一个新目标（5字段）</button>
@@ -357,7 +358,7 @@
       <div class="card diary">
         <div class="d-date">📅 ${esc(d.date)}</div>
         <div class="d-line" style="white-space:pre-wrap">${esc(d.content)}</div>
-      </div>`).join(''):`<div class="empty"><div class="em">📔</div><p>还没有日记。<br>记几笔随记后，点下方按钮一键整理。</p></div>`;
+      </div>`).join(''):`<div class="empty"><div class="em">📔</div><p>还没有日记。<br>先记几笔随记，再一键整理成日记。</p></div>`;
 
     view.innerHTML=`
       <div class="card">
@@ -380,6 +381,7 @@
       const v=$('#note-input').value.trim(); if(!v){ toast('写点什么'); return; }
       const note=S.addNote({text:v}); const r=E.refineNote(note);
       S.updateNote(note.id,{emotion:r.emotion,points:r.points,taskId:r.taskId,refined:true});
+      const er=E.emotionResponse(note); if(er) S.pushLog('军师', er, 'comfort');
       $('#note-input').value=''; toast(r.suggestion||'已记录'); renderNotes();
     });
     $('#review-btn').addEventListener('click',()=>{
