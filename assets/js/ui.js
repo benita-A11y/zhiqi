@@ -236,6 +236,7 @@
         <div class="row wrap mt12">
           ${g.status!=='done'&&g.stageIndex<g.stages.length-1?`<button class="btn ghost sm" data-advance="${g.id}">推进到下一阶段</button>`:''}
           ${g.status!=='done'?`<button class="btn mint sm" data-complete="${g.id}">完成目标</button>`:''}
+          <button class="btn ghost sm danger" data-delgoal="${g.id}">删除目标</button>
         </div>
       </div>`;
     }).join('');
@@ -272,6 +273,11 @@
     view.querySelectorAll('[data-complete]').forEach(x=>x.addEventListener('click',()=>{
       if(confirm('确认这个目标已经完成？军师会为你升级代号并推荐下一局。')){
         U.completeGoal(x.dataset.complete); toast('🏆 目标达成，代号升级！'); renderManual(); updateTopbar();
+      }
+    }));
+    view.querySelectorAll('[data-delgoal]').forEach(x=>x.addEventListener('click',()=>{
+      if(confirm('删除这个目标吗？\n它名下的任务也会一并移除。\n——军师会记得你走过的每一局，但此目标将不再出现在棋谱里。')){
+        S.deleteGoal(x.dataset.delgoal); toast('目标已移除。想再开局的时候，随时立一个新目标。'); renderManual(); updateTopbar();
       }
     }));
     view.querySelectorAll('[data-addreco]').forEach(x=>x.addEventListener('click',()=>{
