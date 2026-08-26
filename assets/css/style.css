@@ -153,7 +153,7 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
   .side-item span{font-size:19px;}
   .side-item.active{background:linear-gradient(135deg,rgba(197,180,227,.22),rgba(180,212,227,.22));color:var(--purple-d);}
   .side-foot{font-size:11px;color:var(--ink-3);padding:8px;text-align:center;line-height:1.6;}
-  .view{margin-left:max(var(--sidebar-w), calc(50vw - 480px));margin-right:auto;padding-top:84px;max-width:960px;height:100vh;min-height:0;}
+  .view{margin-left:max(var(--sidebar-w), calc(50vw - 600px));margin-right:auto;padding-top:84px;max-width:1200px;height:100vh;min-height:0;}
   .view-inner{max-width:960px;margin:0 auto;}
 }
 
@@ -649,11 +649,32 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 .drag-clone{position:fixed;z-index:9999;pointer-events:none;opacity:.92;transform:scale(1.02);box-shadow:var(--shadow);}
 .drop-active{background:rgba(180,227,212,.25);outline:1.5px dashed var(--mint-d);outline-offset:-2px;border-radius:8px;}
 
-/* 大屏：左侧宽一点 */
+/* 大屏（>=900px）：参考计划本周视图，7 列一行 + 顶部重点面板 */
 @media(min-width:900px){
-  .week-main{grid-template-columns: 220px repeat(4, 1fr); gap:10px;}
-  .week-focus-panel{padding:14px;}
-  .wf-tab{font-size:12px;padding:6px 0;}
+  .week-main{
+    grid-template-columns: repeat(7, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      "focus focus focus focus focus focus focus"
+      "d1 d2 d3 d4 d5 d6 d7";
+    gap:10px;
+  }
+  .week-card-placeholder{display:none;}
+  .week-focus-panel{
+    flex-direction:row;
+    align-items:stretch;
+    padding:12px 14px;
+    gap:12px;
+  }
+  .wf-tabs{
+    flex-direction:column;
+    width:110px;
+    flex:none;
+    margin-bottom:0;
+    gap:8px;
+  }
+  .wf-tab{font-size:12px;padding:8px 0;}
+  .wf-body{flex:1;}
   .wf-area{font-size:12px;}
   .week-card{padding:10px;}
   .wc-dow{font-size:11px;padding:4px 9px;}
