@@ -55,15 +55,19 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 
 /* ---------- 布局骨架 ---------- */
 #app{
+  height:100vh;
   min-height:100vh;
+  overflow:hidden;
   display:flex;
   flex-direction:column;
 }
 .view{
   flex:1;
+  min-height:0;
   width:100%;
   max-width:920px;
   margin:0 auto;
+  overflow-y:auto;
   padding:16px 16px calc(var(--tabbar-h) + 28px);
 }
 
@@ -501,7 +505,7 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 /* ============================================================
    棋历·本周视图（GoalDay 卡片网格 + 小周历选择器）
    ============================================================ */
-.cal-week-layout{animation:fade .22s;}
+.cal-week-layout{animation:fade .22s;display:flex;flex-direction:column;height:100%;}
 
 /* 顶部 Wxx 标题与小周历 */
 .week-topbar{position:relative;margin:2px 0 14px;}
@@ -528,13 +532,13 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 .week-main{
   display:grid;
   grid-template-columns: 152px repeat(4, 1fr);
-  grid-template-rows: repeat(2, 1fr);
+  grid-template-rows: repeat(2, minmax(0, 1fr));
   grid-template-areas:
     "focus d1 d2 d3 d4"
     "focus d5 d6 d7 ph";
   gap:8px;
-  /* 让整屏可见：减去顶部标题、小提示、tabbar 和页边距 */
-  min-height: calc(100vh - var(--topbar-h) - 48px - 76px - 24px);
+  flex:1;
+  min-height:0;
 }
 .week-focus-panel{grid-area:focus;}
 .week-card[data-date-idx="0"]{grid-area:d1;}
@@ -656,12 +660,13 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 @media(max-width:640px){
   .week-main{
     grid-template-columns: repeat(4, 1fr);
-    grid-template-rows: auto repeat(2, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
     grid-template-areas:
       "focus focus focus focus"
       "d1 d2 d3 d4"
       "d5 d6 d7 ph";
-    min-height: calc(100vh - var(--topbar-h) - 44px - 66px - 16px);
+    flex:1;
+    min-height:0;
     gap:6px;
   }
   .week-focus-panel{
