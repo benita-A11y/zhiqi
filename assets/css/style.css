@@ -68,6 +68,8 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
   max-width:920px;
   margin:0 auto;
   overflow-y:auto;
+  display:flex;
+  flex-direction:column;
   padding:16px 16px calc(var(--tabbar-h) + 28px);
 }
 
@@ -125,6 +127,9 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 .tab.active{color:var(--purple-d);}
 .tab.active span{filter:none;transform:translateY(-1px) scale(1.05);}
 
+/* 侧边栏仅桌面端显示，移动/平板隐藏，避免抢占高度 */
+.sidebar{display:none;}
+
 /* ---------- 桌面端：侧边栏 ---------- */
 @media(min-width:1024px){
   #app{flex-direction:row;flex-wrap:wrap;}
@@ -148,7 +153,7 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
   .side-item span{font-size:19px;}
   .side-item.active{background:linear-gradient(135deg,rgba(197,180,227,.22),rgba(180,212,227,.22));color:var(--purple-d);}
   .side-foot{font-size:11px;color:var(--ink-3);padding:8px;text-align:center;line-height:1.6;}
-  .view{margin-left:max(var(--sidebar-w), calc(50vw - 480px));margin-right:auto;padding-top:84px;max-width:960px;}
+  .view{margin-left:max(var(--sidebar-w), calc(50vw - 480px));margin-right:auto;padding-top:84px;max-width:960px;height:100vh;min-height:0;}
   .view-inner{max-width:960px;margin:0 auto;}
 }
 
@@ -505,7 +510,8 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 /* ============================================================
    棋历·本周视图（GoalDay 卡片网格 + 小周历选择器）
    ============================================================ */
-.cal-week-layout{animation:fade .22s;display:flex;flex-direction:column;height:100%;}
+#cal-body{flex:1;min-height:0;display:flex;flex-direction:column;}
+.cal-week-layout{animation:fade .22s;display:flex;flex-direction:column;flex:1;min-height:0;}
 
 /* 顶部 Wxx 标题与小周历 */
 .week-topbar{position:relative;margin:2px 0 14px;}
