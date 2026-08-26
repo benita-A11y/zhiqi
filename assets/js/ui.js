@@ -558,12 +558,14 @@
     if(calMode==='day') body=renderCalDay();
     else if(calMode==='week') body=renderCalWeek();
     else body=renderCalMonth();
+    // 说明文案只在「今日」视图显示，本周视图要尽最大空间给 8 分格
+    const hint = calMode==='day' ? `<p class="small muted mt8">军师已预排今日任务。点击 + 号快速添加，拖动任务可改期，改动会同步回今日棋局。</p>` : '';
     view.innerHTML=`
       <div class="card cal-head">
         <div class="cal-title">📅 棋历</div>
         ${segTabs}
       </div>
-      <p class="small muted mt8">军师已预排本周任务。点击卡片 + 号快速添加，拖动 ⠿ 可在天之间改期，改动会实时同步回今日棋局。</p>
+      ${hint}
       <div id="cal-body">${body}</div>
     `;
     bindCalendar();
@@ -619,22 +621,15 @@
       </div>`);
     }
 
-    // 左侧本周重点/总结
+    // 左侧本周重点/总结：参考图没有统计块，只保留 Tab + 输入 + 保存，把空间还给格子
     const focusBody = weekFocusTab==='focus'
-      ? `<textarea class="wf-area" id="wf-focus" placeholder="本周最想完成什么？写一句就行，军师会据此调整优先级。">${esc(focusData.focus)}</textarea>
-         <button class="btn primary sm block mt8" id="wf-save">保存重点</button>`
+      ? `<div class="wf-summary">
+           <textarea class="wf-area" id="wf-focus" placeholder="本周最想完成什么？">${esc(focusData.focus)}</textarea>
+           <button class="btn primary sm block mt8" id="wf-save">保存</button>
+         </div>`
       : `<div class="wf-summary">
-           <div class="wf-stat">
-             <span>已排程</span><b>${weekScheduledCount(mon)}</b>
-           </div>
-           <div class="wf-stat">
-             <span>已完成</span><b>${weekDoneCount(mon)}</b>
-           </div>
-           <div class="wf-stat">
-             <span>完成率</span><b>${weekRate(mon)}%</b>
-           </div>
-           <textarea class="wf-area mt8" id="wf-summary" placeholder="自己写本周总结，或等周日让军师一键生成。">${esc(focusData.summary)}</textarea>
-           <button class="btn ghost sm block mt8" id="wf-save-summary">保存总结</button>
+           <textarea class="wf-area" id="wf-summary" placeholder="自己写本周总结，或等周日让军师一键生成。">${esc(focusData.summary)}</textarea>
+           <button class="btn ghost sm block mt8" id="wf-save-summary">保存</button>
          </div>`;
 
     // 7 天卡片：上 4 下 3（左侧重点面板跨两行）
