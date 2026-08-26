@@ -234,7 +234,9 @@
     save();
   }
   function setDone(id, done){
-    const t = updateTask(id,{done});
+    const patch = {done};
+    if(done) patch.doneAt = Date.now();   // 记录完成时刻，供预判系统判断「熬夜完成」
+    const t = updateTask(id, patch);
     if(t){ afterTaskToggled(t, done); }
     return t;
   }
@@ -243,6 +245,17 @@
   let _afterToggle = null;
   function onTaskToggled(fn){ _afterToggle = fn; }
   function afterTaskToggled(t, done){ if(_afterToggle) _afterToggle(t, done); }
+
+  /* 近 7 天某类任务的完成率（难度自适应用） */
+  function typeDoneRate(type){
+    const st=_state; let total=0, done=0;
+    for(let i=1;i<=7;i++){
+      const ds=fmtDate(shiftDay(today(),-i));
+      const arr=(st.tasks[ds]||[]).filter(t=>t.type===type);
+      total+=arr.length; done+=arr.filter(t=>t.done).length;
+    }
+    return total? done/total : 0.7;
+  }
 
   /* ---------- 目标 ---------- */
   function addGoal(g){
@@ -292,7 +305,7 @@
     uid, fmtDate, today, shiftDay, weekdayCN, weekdayShort, weekOf, INBOX, isoWeek, weekKey,
     tasksOf, ensureDate, addTask, updateTask, deleteTask, reorder, setDone, onTaskToggled,
     setTaskDate, unscheduled, pushDragLog, dragOutCount, dragInCount, getWeekFocus, setWeekFocus, setWeekSummary,
-    addGoal, getGoal, updateGoal, advanceStage, deleteGoal,
+    addGoal, getGoal, updateGoal, advanceStage, deleteGoal, typeDoneRate,
     addNote, updateNote, addDiary, pushLog,
     KEY
   };
