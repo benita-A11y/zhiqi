@@ -177,6 +177,7 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 .btn:active{transform:scale(.97);}
 .btn.primary{background:linear-gradient(135deg,var(--purple),var(--purple-d));color:#fff;box-shadow:var(--shadow-sm);}
 .btn.ghost{background:var(--bg);color:var(--ink-2);border:1px solid var(--line-2);}
+.btn.ghost.danger{color:#b56b63;border-color:rgba(181,107,99,.32);}
 .btn.mint{background:linear-gradient(135deg,var(--mint),var(--mint-d));color:#fff;}
 .btn.pink{background:linear-gradient(135deg,var(--pink),var(--pink-d));color:#fff;}
 .btn.block{width:100%;}
