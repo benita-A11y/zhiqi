@@ -637,9 +637,8 @@
            <button class="btn ghost sm block mt8" id="wf-save-summary">保存总结</button>
          </div>`;
 
-    // 右侧 7 天卡片网格
-    const cards=[];
-    for(let i=0;i<7;i++){
+    // 7 天卡片：上 4 下 3（左侧重点面板跨两行）
+    function dayCard(i){
       const dd=addDays(mon,i);
       const ds=S.fmtDate(dd);
       const arr=S.tasksOf(ds).slice().sort((a,b)=>a.order-b.order);
@@ -649,18 +648,18 @@
       const dowName=S.weekdayCN[dd.getDay()];
       const dowColor=['周一','周二','周三','周四','周五','周六','周日'][i];
       const inner=arr.length?arr.map(t=>calTaskCard(t,ds)).join(''):`<div class="zone-empty small">拖入任务</div>`;
-      cards.push(`
-        <div class="week-card ${isToday?'is-today':''}">
+      return `
+        <div class="week-card ${isToday?'is-today':''}" data-drop-card data-date="${ds}" data-date-idx="${i}">
           <div class="wc-head">
             <div class="wc-dow ${dowColor}"><span>${dowName}</span></div>
-            <div class="wc-date">${dd.getMonth()+1}月${dd.getDate()}日</div>
+            <div class="wc-date">${dd.getMonth()+1}/${dd.getDate()}</div>
             <div class="wc-count">${arr.length?`<b>${done}/${arr.length}</b>`:'0'}</div>
             <button class="wc-add" data-adddate="${ds}" title="添加任务">+</button>
           </div>
           <div class="wc-body">${calDropZone(inner,'wc-zone',ds)}</div>
           ${rate!==null?`<div class="wc-rate ${rate===100?'all':rate>0?'part':'none'}"><div style="width:${rate}%"></div></div>`:'<div class="wc-rate none"><div></div></div>'}
         </div>
-      `);
+      `;
     }
 
     return `
@@ -686,9 +685,8 @@
             </div>
             <div class="wf-body fade-in">${focusBody}</div>
           </div>
-          <div class="week-grid">
-            ${cards.join('')}
-          </div>
+          <div class="week-card-placeholder" aria-hidden="true"></div>
+          ${dayCard(0)}${dayCard(1)}${dayCard(2)}${dayCard(3)}${dayCard(4)}${dayCard(5)}${dayCard(6)}
         </div>
       </div>
     `;
@@ -780,14 +778,16 @@
     }));
   }
 
-  /* 跨容器拖放：⠿ 手柄启动，落到 [data-drop] 改期（事件委托，只绑定一次） */
+  /* 跨容器拖放：按住任务卡任意位置即可拖动改期（事件委托，只绑定一次） */
   function enableDnD(root){
     if(root.dataset.dndReady==='1') return;
     root.dataset.dndReady='1';
     let dragEl=null, clone=null, activeZone=null, fromDate=null, taskId=null, taskType=null;
     root.addEventListener('pointerdown',e=>{
-      const h=e.target.closest('.drag-h'); if(!h) return;
-      const card=h.closest('[data-drag]'); if(!card) return;
+      const card=e.target.closest('[data-drag]');
+      if(!card) return;
+      // 点复选框/按钮时交给 click，不启动拖动
+      if(e.target.closest('.cal-check') || e.target.closest('button') || e.target.closest('a')) return;
       e.preventDefault();
       dragEl=card; taskId=card.dataset.id; fromDate=card.dataset.date; taskType=card.dataset.type;
       const r=card.getBoundingClientRect();
@@ -801,7 +801,9 @@
       if(!dragEl) return;
       clone.style.left=(e.clientX-22)+'px'; clone.style.top=(e.clientY-18)+'px';
       const under=document.elementFromPoint(e.clientX,e.clientY);
-      const zone=under&&under.closest('[data-drop]');
+      // 优先命中卡片内部的 drop-zone，其次命中整张卡片本身
+      let zone=under&&under.closest('[data-drop]');
+      if(!zone) zone=under&&under.closest('[data-drop-card]');
       if(zone!==activeZone){
         if(activeZone) activeZone.classList.remove('drop-active');
         activeZone=zone; if(activeZone) activeZone.classList.add('drop-active');
@@ -810,7 +812,8 @@
     function end(){
       if(!dragEl) return;
       if(activeZone){
-        const toDate=activeZone.dataset.date;
+        // 落到卡片本身时，实际目标日期取卡片 data-date
+        let toDate=activeZone.dataset.date;
         const seg=activeZone.dataset.seg;
         const res=S.setTaskDate(taskId, toDate);
         if(seg) S.updateTask(taskId,{time:seg});
