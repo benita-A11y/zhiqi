@@ -2,6 +2,16 @@
    执棋 · 启动与路由 (app.js)
    ========================================================= */
 (function(){
+  // 逃生舱：网址加 ?force=1 打开一次，强制注销旧 Service Worker 并清空缓存后重载，
+  // 彻底解决「部署了却死活看不到更新」的问题（只需一次，之后全自动更新）。
+  if(location.search.indexOf('force')>=0 && 'serviceWorker' in navigator){
+    Promise.all([
+      caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))),
+      navigator.serviceWorker.getRegistrations().then(rs=>Promise.all(rs.map(r=>r.unregister())))
+    ]).then(()=>{ window.location.href = location.pathname + location.hash; });
+    return;
+  }
+
   const S = window.ZQ.store;
   const E = window.ZQ.engine;
   const U = window.ZQ.undercover;
@@ -118,7 +128,13 @@
 
     // PWA：仅在 http/https 下注册，file:// 直接打开同样可用
     if('serviceWorker' in navigator && location.protocol.indexOf('http')===0){
-      navigator.serviceWorker.register('sw.js').catch(()=>{});
+      // 注册 URL 带版本号：每次部署版本号变化，浏览器无法命中旧缓存，实现「打开即更新」
+      navigator.serviceWorker.register('sw.js?v=14').catch(()=>{});
+      // 新版本 Service Worker 接管后，自动刷新一次页面，让用户立即看到新内容
+      let _reloaded=false;
+      navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+        if(_reloaded) return; _reloaded=true; window.location.reload();
+      });
     }
   }
 
