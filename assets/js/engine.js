@@ -212,15 +212,50 @@
     if(dateStr < todayStr) return;                 // 不为过去补
     const has = (st.tasks[dateStr]||[]).some(t=>t.source==='auto');
     if(has) return;
-    // —— 拖拽学习：若这一天历史上总被往外拖（过载），本日少派任务 ——
+
+    const d = new Date(dateStr+'T00:00:00');
+    const wd = d.getDay(); // 0=日
+    const dowName = S.weekdayCN[wd];
+    const isWeekend = wd===0 || wd===6;
+
+    // —— AI 学习 1：拖拽学习 —— 若这一天历史上总被往外拖（过载），本日少派任务
     const overload = S.dragOutCount(dateStr);
-    const keepRatio = overload>=3 ? 0.5 : overload>=2 ? 0.7 : 1;
-    const wd = new Date(dateStr+'T00:00:00').getDay(); // 0=日
+    let keepRatio = overload>=3 ? 0.5 : overload>=2 ? 0.7 : 1;
+
+    // —— AI 学习 2：完成率学习 —— 近 7 天完成率低时减量，高时保持/微增
+    const recent = last7DoneRate();
+    if(recent < 0.35) keepRatio *= 0.75;
+    else if(recent > 0.85) keepRatio = Math.min(1.15, keepRatio + 0.1);
+
+    // —— AI 学习 3：周末/ISFJ 保护 —— 周六日少派刚性任务，多给顺路/习惯类
+    if(isWeekend && keepRatio>0.6) keepRatio = 0.6;
+
+    // —— AI 学习 4：本周重点关键词 —— 提升相关任务优先级，抑制无关任务
+    const {year, week} = S.isoWeek(d);
+    const focusText = (S.getWeekFocus(year, week).focus || '').toLowerCase();
+    const boostKws = focusKeywords(focusText);
+
     st.goals.filter(g=>g.status==='active').forEach(g=>{
       const plan = weeklyPlanFor(g);
       let specs = (plan[wd]||[]);
-      if(keepRatio<1) specs = specs.filter(s=>s.type==='evening').concat( // 晚间固定保留
-        specs.filter(s=>s.type!=='evening').slice(0, Math.ceil(specs.filter(s=>s.type!=='evening').length*keepRatio)));
+      if(!specs.length) return;
+
+      // 按本周重点给每项任务打分（含关键词加分）
+      specs = specs.map(spec=>{
+        let score = 0;
+        const title = spec.title.toLowerCase();
+        boostKws.forEach(kw=>{ if(title.indexOf(kw)>=0) score += 2; });
+        // 晚间/习惯类更稳定，优先保留
+        if(spec.type==='evening' || spec.type==='habit') score += 0.5;
+        // 周末优先顺路类
+        if(isWeekend && spec.type==='byway') score += 1;
+        return {...spec, score};
+      }).sort((a,b)=>b.score - a.score);
+
+      // 根据 keepRatio 裁剪
+      const targetCount = Math.max(1, Math.round(specs.length * keepRatio));
+      specs = specs.slice(0, targetCount);
+
       specs.forEach(spec=>{
         S.addTask(dateStr, {
           title:spec.title, duration:spec.duration, type:spec.type,
@@ -228,6 +263,45 @@
         });
       });
     });
+
+    // 若某天因裁剪后无任务，但用户写了本周重点，补一个「复习重点」微任务避免空卡
+    const finalTasks = st.tasks[dateStr]||[];
+    if(!finalTasks.length && boostKws.length && !isWeekend){
+      S.addTask(dateStr, {
+        title:`回顾本周重点：${S.getWeekFocus(year, week).focus.slice(0,18)}`,
+        duration:10, type:'fragment', goalId:null, source:'auto'
+      });
+    }
+  }
+
+  /* 从本周重点文本提取目标关键词（用于提升相关任务优先级） */
+  function focusKeywords(text){
+    if(!text) return [];
+    const map={
+      '听力':['听力','精听','连读','section'], '阅读':['阅读','真题','篇章'],
+      '写作':['写作','作文','模板'], '翻译':['翻译','汉译英'],
+      '单词':['单词','词汇','背单词'], '错题':['错题','薄弱','复习'],
+      '计算机':['计算机','操作','ppt','excel','word'],
+      '减肥':['减肥','体重','运动','散步','快走','跳操'],
+      '考公':['考公','申论','行测','岗位','面试'],
+      '练字':['练字','书写','卷面']
+    };
+    const out=[];
+    Object.keys(map).forEach(k=>{
+      if(text.indexOf(k)>=0) out.push(...map[k]);
+    });
+    return [...new Set(out)];
+  }
+
+  /* 近 7 天完成率（不含今天） */
+  function last7DoneRate(){
+    const st=S.load(); let total=0, done=0;
+    for(let i=1;i<=7;i++){
+      const ds=S.fmtDate(S.shiftDay(S.today(), -i));
+      const arr=st.tasks[ds]||[];
+      total+=arr.length; done+=arr.filter(t=>t.done).length;
+    }
+    return total? done/total : 0.7;
   }
 
   /* 为本周（周一~周日，含今天及未来）预排 auto 任务，让周视图一打开就有内容 */
@@ -616,7 +690,7 @@
 
   window.ZQ.engine = {
     planFor, weeklyPlanFor, ensureDailyPlan, ensureWeekPlan, recordDrag, fridayBoost,
-    strategistCommand, parseSentence,
+    strategistCommand, parseSentence, focusKeywords,
     refineNote, generateReview, recommendGoals, completeFeedback, undercoverNudge
   };
 })();
