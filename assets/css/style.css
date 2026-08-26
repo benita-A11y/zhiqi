@@ -28,7 +28,7 @@
   --shadow-sm:0 2px 10px rgba(140,111,201,.08);
   --shadow-press:0 1px 4px rgba(140,111,201,.14);
 
-  --tabbar-h:64px;
+  --tabbar-h:56px;
   --topbar-h:56px;
   --sidebar-w:220px;
 
@@ -119,10 +119,10 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
   padding-bottom:env(safe-area-inset-bottom);
 }
 .tab{
-  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
-  color:var(--ink-3);font-size:11px;transition:color .15s;
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  color:var(--ink-3);font-size:10px;transition:color .15s;
 }
-.tab span{font-size:21px;filter:grayscale(.4);transition:transform .15s,filter .15s;}
+.tab span{font-size:19px;filter:grayscale(.4);transition:transform .15s,filter .15s;}
 .tab em{font-style:normal;font-weight:600;}
 .tab.active{color:var(--purple-d);}
 .tab.active span{filter:none;transform:translateY(-1px) scale(1.05);}
@@ -628,18 +628,18 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 .cal-meta .dot{width:5px;height:5px;border-radius:50%;}
 
 /* 本周视图卡片内任务：参考计划本/GoalDay 风格，横向多行 + 隐藏把手/元信息 */
-.week-card .cal-task{align-items:flex-start;padding:3px 5px;gap:3px;margin-bottom:3px;}
+.week-card .cal-task{align-items:center;padding:6px 7px;gap:5px;margin-bottom:5px;}
 .week-card .cal-task .drag-h{display:none;}
-.week-card .cal-task .cal-check{flex:none;margin-top:1px;}
+.week-card .cal-task .cal-check{flex:none;margin-top:0;}
 .week-card .cal-task .cal-tt{
   display:block;
   flex:1;
   min-width:0;
   white-space:normal;
   overflow:hidden;
-  max-height:2.5em;
-  font-size:10px;
-  line-height:1.25;
+  max-height:2.7em;
+  font-size:11px;
+  line-height:1.3;
 }
 .week-card .cal-task .cal-meta{display:none;}
 
@@ -685,7 +685,11 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 }
 
 /* 移动端：参考计划本 8 分格（2 列 × 4 行），每格等高，文字横向 */
+/* 移动端：参考计划本 8 分格（2 列 × 4 行），每格等高，元素更大、留白更足 */
 @media(max-width:640px){
+  .view{padding:12px 12px calc(var(--tabbar-h) + 16px);}
+  .week-topbar{margin:0 0 8px;}
+  .week-title-btn{padding:6px 12px;font-size:14px;}
   .week-main{
     grid-template-columns: repeat(2, 1fr);
     grid-template-rows: repeat(4, minmax(0, 1fr));
@@ -696,34 +700,35 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
       "d6 d7";
     flex:1;
     min-height:0;
-    gap:6px;
+    gap:8px;
   }
   .week-card-placeholder{display:none;}
   .week-focus-panel{
     flex-direction:column;
-    padding:6px;
-    gap:4px;
+    padding:8px;
+    gap:5px;
     overflow:hidden;
   }
-  .wf-tabs{flex-direction:row;width:auto;flex:none;gap:4px;margin-bottom:2px;}
-  .wf-tab{padding:3px 6px;font-size:9px;}
+  .wf-tabs{flex-direction:row;width:auto;flex:none;gap:5px;margin-bottom:3px;}
+  .wf-tab{flex:1;padding:4px 0;font-size:10px;}
   .wf-body{flex:1;min-height:0;overflow:hidden;}
-  .wf-area{min-height:0;flex:1;font-size:9px;padding:4px 6px;border-radius:8px;}
-  #wf-save, #wf-save-summary{margin-top:3px;padding:5px 0;font-size:9px;}
-  .wf-summary{gap:3px;}
-  .wf-stat{padding:3px 5px;}
-  .wf-stat span{font-size:8px;}
-  .wf-stat b{font-size:10px;}
-  .week-card{padding:6px;border-radius:12px;}
-  .wc-head{margin-bottom:3px;gap:2px;}
+  .wf-area{min-height:0;flex:1;font-size:10px;padding:6px 8px;border-radius:10px;}
+  #wf-save, #wf-save-summary{margin-top:4px;padding:6px 0;font-size:10px;}
+  .wf-summary{gap:4px;flex:1;overflow:hidden;}
+  .week-card{padding:8px;border-radius:14px;}
+  .wc-head{margin-bottom:5px;gap:4px;}
   .wc-head .wc-count{display:none;}
-  .wc-dow{padding:2px 5px;font-size:8px;}
-  .wc-date{font-size:9px;}
-  .wc-add{width:16px;height:16px;font-size:11px;}
-  .cal-task{font-size:9px;padding:3px 4px;margin-bottom:2px;}
-  .drag-h{display:none;}
-  .week-card .cal-task{padding:2px 3px;gap:2px;align-items:flex-start;}
-  .week-card .cal-task .cal-check{width:11px;height:11px;margin-top:1px;}
-  .week-card .cal-task .cal-tt{font-size:9px;line-height:1.2;max-height:2.4em;}
-  .wf-area{min-height:28px;}
+  .wc-dow{padding:3px 7px;font-size:10px;}
+  .wc-date{font-size:11px;}
+  .wc-add{width:20px;height:20px;font-size:13px;}
+  .week-card .wc-rate{display:none;}
+  .week-card .cal-task{
+    padding:6px 7px;
+    gap:5px;
+    align-items:center;
+    margin-bottom:5px;
+  }
+  .week-card .cal-task .cal-check{width:15px;height:15px;}
+  .week-card .cal-task .cal-tt{font-size:11px;line-height:1.3;max-height:2.7em;}
+  .zone-empty{font-size:10px;padding:10px 0;}
 }
