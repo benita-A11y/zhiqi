@@ -199,6 +199,10 @@
     const p=_state.profile; if(!p.dragLog) return 0;
     return p.dragLog.filter(x=>x.from===dateStr).length;
   }
+  function dragInCount(dateStr){
+    const p=_state.profile; if(!p.dragLog) return 0;
+    return p.dragLog.filter(x=>x.to===dateStr).length;
+  }
   /* 周重点 / 本周总结（按 ISO 周 key：2026-W35） */
   function weekKey(y,w){ return `${y}-W${String(w).padStart(2,'0')}`; }
   function isoWeek(d){
@@ -281,7 +285,7 @@
     load, save, reset, exportJSON, importJSON,
     uid, fmtDate, today, shiftDay, weekdayCN, weekdayShort, weekOf, INBOX, isoWeek, weekKey,
     tasksOf, ensureDate, addTask, updateTask, deleteTask, reorder, setDone, onTaskToggled,
-    setTaskDate, unscheduled, pushDragLog, dragOutCount, getWeekFocus, setWeekFocus, setWeekSummary,
+    setTaskDate, unscheduled, pushDragLog, dragOutCount, dragInCount, getWeekFocus, setWeekFocus, setWeekSummary,
     addGoal, getGoal, updateGoal, advanceStage,
     addNote, updateNote, addDiary, pushLog,
     KEY
