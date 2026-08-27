@@ -50,7 +50,7 @@
 
     let html = `
       <div class="card strategist-cmd fade-in">
-        <div class="who">${esc(cmd.who)}</div>
+        <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> ${esc(cmd.who)}</div>
         <div class="msg">${esc(cmd.msg)}</div>
       </div>
 
@@ -72,7 +72,7 @@
       const nudge=E.undercoverNudge();
       html += `
       <div class="feedback-box fade-in">
-        <div class="ttl">📨 军师回执</div>
+        <div class="ttl"><img class="ttl-avatar" src="assets/img/strategist-avatar.png" alt=""> 军师回执</div>
         <div class="msg">${esc(fb.msg)}</div>
         <div class="intel">🕵️ 情报碎片 ${fb.intel} · ${esc(fb.next)}</div>
         ${nudge?`<div class="intel">${esc(nudge)}</div>`:''}
@@ -84,7 +84,7 @@
   }
 
   function renderTaskList(tasks){
-    if(tasks.length===0) return `<div class="empty"><div class="em">♟️</div><p>今日棋局空空如也。<br>说一句话，或点开🎖️让军师派发任务。</p></div>`;
+    if(tasks.length===0) return `<div class="empty"><div class="em">♟️</div><p>今日棋局空空如也。<br>说一句话，或点开军师头像让军师派发任务。</p></div>`;
     let html=''; let lastType=null;
     tasks.forEach(t=>{
       if(t.type!==lastType){
@@ -234,7 +234,7 @@
 
     view.innerHTML = `
       <div class="card reco-card">
-        <div class="card-title">🎖️ 军师已为你布好局</div>
+        <div class="card-title"><img class="title-avatar" src="assets/img/strategist-avatar.png" alt=""> 军师已为你布好局</div>
         <p class="small muted mt8">大目标，军师替你拆成每天的小任务。先做手上的，做完自动推下一步。</p>
         <div class="mt12">${recoHtml}</div>
       </div>
@@ -458,7 +458,7 @@
         <div class="mt12">${chain}</div>
       </div>
       <div class="card">
-        <div class="card-title">🎖️ 军师密语</div>
+        <div class="card-title"><img class="title-avatar" src="assets/img/strategist-avatar.png" alt=""> 军师密语</div>
         <div class="secret-log mt12">${secrets}</div>
       </div>
     `;
