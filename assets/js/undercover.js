@@ -33,13 +33,26 @@
 
   function progressToNext(){
     const st=S.load(); const u=st.undercover;
-    // 计算升级所需（取 streak 与 目标 两条线中较近的一条）
     const goalsDone = st.goals.filter(g=>g.status==='done').length;
-    let need, cur, label;
-    if(goalsDone<1){ need=3; cur=u.streak; label='连续3天落子 → 执棋者·渗透'; }
-    else if(goalsDone<3){ need=7; cur=u.streak; label='连续7天落子 → 执棋者·暗行'; }
-    else { need=30; cur=u.streak; label='连续30天 → 执棋者·无影'; }
-    return { cur, need, label, pct:Math.min(100,Math.round(cur/need*100)) };
+    const level = getLevelInfo().level;
+    // 晋升有「连续天数」与「完成目标」两条线，取更近的一条展示，避免升了级却还显示旧进度的矛盾
+    const marks=[
+      {n:3, lvl:1, goal:false, label:'连续3天落子 → 执棋者·渗透'},
+      {n:7, lvl:2, goal:false, label:'连续7天落子 → 执棋者·暗行'},
+      {n:30,lvl:3, goal:false, label:'连续30天 → 执棋者·无影'},
+      {n:1, lvl:4, goal:true,  label:'完成1个目标 → 执棋者·渗透'},
+      {n:3, lvl:5, goal:true,  label:'完成3个目标 → 执棋者·无影'},
+    ];
+    let best=null;
+    marks.forEach(m=>{
+      if(m.lvl<=level) return;                 // 已达该等级
+      const cur = m.goal? goalsDone : u.streak;
+      const rem = m.n - cur;
+      if(rem<0) return;
+      if(!best || rem<best.rem) best={cur, need:m.n, label:m.label, pct:Math.min(100,Math.round(cur/m.n*100)), rem};
+    });
+    if(!best) return { cur:0, need:0, label:'已达最高代号', pct:100, rem:0 };
+    return best;
   }
 
   function awardTitle(key){
