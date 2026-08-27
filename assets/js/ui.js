@@ -79,16 +79,6 @@
       </div>`;
     }
 
-    html += `
-      <div class="card mt16">
-        <div class="card-title">📝 随手记一笔</div>
-        <div class="note-input mt8">
-          <textarea id="quick-note" placeholder="闪过脑海的念头、情绪、薄弱点…先记下来，军师帮你整理。"></textarea>
-          <button class="btn ghost block" id="quick-note-btn">记下来，军师提炼</button>
-        </div>
-      </div>
-    `;
-
     view.innerHTML = html;
     bindToday(tasks);
   }
@@ -140,18 +130,6 @@
     };
     $('#quick-add-btn').addEventListener('click',doAdd);
     qin.addEventListener('keydown',e=>{ if(e.key==='Enter') doAdd(); });
-
-    // 随手记
-    $('#quick-note-btn').addEventListener('click',()=>{
-      const v=$('#quick-note').value.trim(); if(!v){ toast('写点什么吧'); return; }
-      const note=S.addNote({text:v});
-      const r=E.refineNote(note);
-      S.updateNote(note.id,{emotion:r.emotion,points:r.points,taskId:r.taskId,refined:true});
-      const er=E.emotionResponse(note); if(er) S.pushLog('军师', er, 'comfort');
-      $('#quick-note').value='';
-      toast(r.suggestion||'已记录，军师已提炼');
-      renderToday();
-    });
 
     // 勾选完成
     view.querySelectorAll('[data-check]').forEach(c=>{
@@ -434,37 +412,14 @@
       <div class="card"><div class="card-title">📊 棋力</div>${stat}</div>
       <div class="card chart-card"><div class="card-title">近7天完成率</div>${bars}</div>
       <div class="card chart-card"><div class="card-title">目标进度</div>${goalRows}</div>
-      <div class="card">
-        <div class="card-title">🔐 数据（离线保存）</div>
-        <p class="small muted mt8">所有数据存在本机，飞行模式也能用。可导出备份，换设备时再导入。</p>
-        <div class="row wrap mt12">
-          <button class="btn ghost" id="export-btn">⬇ 导出备份</button>
-          <button class="btn ghost" id="import-btn">⬆ 导入恢复</button>
-          <button class="btn ghost" id="reset-btn">↺ 重置棋局</button>
-        </div>
-        <input type="file" id="import-file" accept="application/json" hidden>
+      <div class="card hint-card">
+        <div class="card-title">🔐 数据离线保存</div>
+        <p class="small muted mt8">所有数据存在本机，飞行模式也能用。导出 / 导入 / 重置请在「更多 → 工具箱 → 数据备份」。</p>
       </div>
     `;
     bindPower();
   }
-  function bindPower(){
-    $('#export-btn').addEventListener('click',()=>{
-      const data=S.exportJSON();
-      const blob=new Blob([data],{type:'application/json'});
-      const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-      a.download='执棋备份_'+S.fmtDate(S.today())+'.json'; a.click(); toast('已导出备份');
-    });
-    $('#import-btn').addEventListener('click',()=>$('#import-file').click());
-    $('#import-file').addEventListener('change',e=>{
-      const f=e.target.files[0]; if(!f) return;
-      const r=new FileReader();
-      r.onload=()=>{ try{ S.importJSON(r.result); toast('导入成功'); navigate(current); updateTopbar(); }catch(err){ toast('文件格式不对'); } };
-      r.readAsText(f);
-    });
-    $('#reset-btn').addEventListener('click',()=>{
-      if(confirm('确定要清空所有棋局、重新开始吗？建议先导出备份。')){ S.reset(); toast('已重置'); navigate('today'); updateTopbar(); }
-    });
-  }
+  function bindPower(){ /* 数据管理已统一收进三级「数据备份」弹窗，棋力仅展示洞察 */ }
 
   /* =========================================================
      视图：卧底
@@ -844,14 +799,21 @@
     else if(current==='power') renderPower();
     else if(current==='undercover') renderUndercover();
     else if(current==='calendar') renderCalendar();
-    // 高亮导航
-    document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view===current));
+    // 高亮导航：一级视图直接高亮；二级/三级视图回落到「更多」入口
+    const primarySet={'today':1,'manual':1};
+    const onMore = !primarySet[current];
+    document.querySelectorAll('.tab').forEach(t=>{
+      if(t.dataset.view==='more') t.classList.toggle('active', onMore);
+      else t.classList.toggle('active', t.dataset.view===current);
+    });
     document.querySelectorAll('.side-item').forEach(t=>t.classList.toggle('active',t.dataset.view===current));
+    document.querySelectorAll('.side-sub').forEach(t=>t.classList.toggle('active',t.dataset.view===current));
     view.scrollTop=0;
     if(current==='today') updateTopbar();
   }
   function navigate(v){
     render(v);
+    try{ window.ZQ.ui.current=v; }catch(e){}
     localStorage.setItem('zhiqi_lastview',v);
   }
 
