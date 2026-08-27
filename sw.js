@@ -1,5 +1,5 @@
 /* 执棋 · Service Worker —— 让 App 可安装、可离线，且「打开即更新」 */
-const CACHE = 'zhiqi-v19';
+const CACHE = 'zhiqi-v20';
 const CORE = [
   './', './index.html',
   './assets/css/style.css',
