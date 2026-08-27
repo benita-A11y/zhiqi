@@ -12,7 +12,7 @@
   <meta property="og:description" content="以待办管理为核心的成长规划平台，把宏大目标拆解成每日可执行的小任务。" />
   <title>执棋 · 每日落一子</title>
   <link rel="manifest" href="assets/manifest.json" />
-  <link rel="stylesheet" href="assets/css/style.css?v=17" />
+  <link rel="stylesheet" href="assets/css/style.css?v=18" />
 </head>
 <body>
   <!-- 应用根 -->
@@ -39,18 +39,15 @@
     <!-- 主内容区 -->
     <main id="view" class="view"></main>
 
-    <!-- 底部导航（移动端） -->
+    <!-- 底部导航（移动端）：仅常驻核心 + 更多入口，默认精简 -->
     <nav class="tabbar" id="tabbar">
       <button class="tab active" data-view="today"><span>♟️</span><em>今日棋局</em></button>
-      <button class="tab" data-view="calendar"><span>📅</span><em>棋历</em></button>
       <button class="tab" data-view="manual"><span>📋</span><em>棋谱</em></button>
-      <button class="tab" data-view="notes"><span>📝</span><em>随记</em></button>
-      <button class="tab" data-view="power"><span>📊</span><em>棋力</em></button>
-      <button class="tab" data-view="undercover"><span>🔐</span><em>卧底</em></button>
+      <button class="tab" data-view="more"><span>⋯</span><em>更多</em></button>
     </nav>
   </div>
 
-  <!-- 军师浮层 -->
+  <!-- 军师浮层（大脑入口，常驻；去除与棋谱重复的「推荐新棋」） -->
   <div class="sheet-mask" id="strategist-sheet" hidden>
     <div class="sheet">
       <div class="sheet-head">
@@ -60,7 +57,6 @@
       <div class="strategist-log" id="strategist-log"></div>
       <div class="strategist-actions">
         <button class="btn ghost" id="btn-tomorrow-preview">预览明日棋局</button>
-        <button class="btn ghost" id="btn-new-goal-suggest">推荐新棋</button>
         <button class="btn primary" id="btn-strategist-dispatch">军师今日派发</button>
       </div>
     </div>
@@ -77,14 +73,71 @@
     </div>
   </div>
 
+  <!-- 更多 · 收纳抽屉（二级常用 + 三级工具箱） -->
+  <div class="sheet-mask" id="more-sheet" hidden>
+    <div class="sheet more-sheet">
+      <div class="sheet-head">
+        <h2>☰ 更多功能</h2>
+        <button class="icon-btn" id="close-more">✕</button>
+      </div>
+      <div class="more-body">
+        <div class="more-sec">
+          <div class="more-sec-title">常用</div>
+          <button class="more-item" data-view="calendar"><span class="mi">📅</span><span class="ml">棋历</span><span class="md">规划与拖拽排程</span></button>
+          <button class="more-item" data-view="notes"><span class="mi">📝</span><span class="ml">随记</span><span class="md">念头与日记</span></button>
+          <button class="more-item" data-view="power"><span class="mi">📊</span><span class="ml">棋力</span><span class="md">完成率与进度</span></button>
+        </div>
+        <div class="more-sec">
+          <div class="more-sec-title muted">工具箱</div>
+          <button class="more-item" data-view="undercover"><span class="mi">🔐</span><span class="ml">卧底档案</span><span class="md">代号与情报</span></button>
+          <button class="more-item" id="open-backup"><span class="mi">💾</span><span class="ml">数据备份</span><span class="md">导出 / 导入 / 重置</span></button>
+          <button class="more-item" id="open-about"><span class="mi">ℹ️</span><span class="ml">关于执棋</span><span class="md">版本与说明</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 数据备份 弹窗（三级 · 低频，原混在棋力里） -->
+  <div class="sheet-mask" id="backup-sheet" hidden>
+    <div class="sheet modal">
+      <div class="sheet-head">
+        <h2>💾 数据备份</h2>
+        <button class="icon-btn" id="close-backup">✕</button>
+      </div>
+      <div class="sheet-body">
+        <p class="small muted">所有数据存在本机，飞行模式也能用。建议常导出备份，换设备时再导入恢复。</p>
+        <div class="row wrap mt16">
+          <button class="btn ghost" id="export-btn">⬇ 导出备份</button>
+          <button class="btn ghost" id="import-btn">⬆ 导入恢复</button>
+          <button class="btn ghost danger" id="reset-btn">↺ 重置棋局</button>
+        </div>
+        <input type="file" id="import-file" accept="application/json" hidden>
+      </div>
+    </div>
+  </div>
+
+  <!-- 关于 弹窗 -->
+  <div class="sheet-mask" id="about-sheet" hidden>
+    <div class="sheet modal">
+      <div class="sheet-head">
+        <h2>ℹ️ 关于执棋</h2>
+        <button class="icon-btn" id="close-about">✕</button>
+      </div>
+      <div class="sheet-body">
+        <p class="small muted" style="line-height:1.7">执棋 · 每天落一子，十年成大局。<br>你不是在打卡，是在卧底。<br><br>以目标拆解为核心，把宏大计划变成每天可完成的小任务。数据全部离线保存在本机。</p>
+        <div class="about-ver" id="about-ver">版本加载中…</div>
+      </div>
+    </div>
+  </div>
+
   <!-- 轻提示 -->
   <div class="toast" id="toast" hidden></div>
 
   <!-- 脚本（普通 script，保证 file:// 直接打开也能跑；?v=N 让更新必走网络） -->
-  <script src="assets/js/store.js?v=17"></script>
-  <script src="assets/js/engine.js?v=17"></script>
-  <script src="assets/js/undercover.js?v=17"></script>
-  <script src="assets/js/ui.js?v=17"></script>
-  <script src="assets/js/app.js?v=17"></script>
+  <script src="assets/js/store.js?v=18"></script>
+  <script src="assets/js/engine.js?v=18"></script>
+  <script src="assets/js/undercover.js?v=18"></script>
+  <script src="assets/js/ui.js?v=18"></script>
+  <script src="assets/js/app.js?v=18"></script>
 </body>
 </html>
