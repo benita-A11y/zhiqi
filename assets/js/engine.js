@@ -655,7 +655,7 @@
     } else body += '· 今日无随记\n';
 
     // 军师点评
-    body += `\n🎖️ 摆渡人点评：\n`;
+    body += `\n摆渡人点评：\n`;
     if(done.length && undone.length===0){
       body += `· 今日全部落子，压了「拖延」一头。\n`;
     } else if(done.length){
