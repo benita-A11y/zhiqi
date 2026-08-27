@@ -747,10 +747,199 @@
     return '';
   }
 
+  /* =========================================================
+     九、军师「预判」系统（比用户先想一步）
+     行为数据 → 规则引擎 → 触发预判 → 今日卡片 + 主动推送
+     ========================================================= */
+  // 目标总周数（取各阶段 weeks 字段里最大的周数）
+  function goalTotalWeeks(g){
+    let w=0;
+    (g.stages||[]).forEach(s=>{ const m=String(s.weeks).match(/(\d+)/g); if(m) w=Math.max(w, +m[m.length-1]); });
+    return w||12;
+  }
+  // 目标距预估截止还剩多少天（null 表示无法估算）
+  function goalRemainingDays(g){
+    const total=goalTotalWeeks(g);
+    const created=new Date(g.createdAt+'T00:00:00');
+    const end=new Date(created); end.setDate(end.getDate()+total*7);
+    const diff=Math.floor((end - S.today())/86400000);
+    return diff;
+  }
+  // 某目标是否「连续 2 天有任务却 0 完成」
+  function missedCategory(){
+    const st=S.load();
+    const goals=st.goals.filter(g=>g.status==='active');
+    for(const g of goals){
+      let missDays=0;
+      for(let i=1;i<=2;i++){
+        const ds=S.fmtDate(S.shiftDay(S.today(),-i));
+        const arr=S.tasksOf(ds).filter(t=>t.goalId===g.id);
+        if(arr.length && arr.every(t=>!t.done)) missDays++;
+      }
+      if(missDays===2) return {key:g.id, label:g.title};
+    }
+    return null;
+  }
+
+  function predict(){
+    const st=S.load();
+    const out=[];
+    const u=st.undercover;
+    // 1. 熬夜预判（提前预警，不等连续3天才说）
+    if((u.nightDoneStreak||0)>=2){
+      out.push({id:'night', text:'你最近连续2晚在深夜落子。明天试着把最难的任务放在早上，晚上会轻松很多。'});
+    }
+    // 2. 某类任务连续2天没怎么动 → 拆分建议
+    const miss=missedCategory();
+    if(miss){
+      out.push({id:'miss_'+miss.key, text:`「${miss.label}」连续2天没怎么动。是不是太难？要不要我把它拆成更小的步骤？`});
+    }
+    // 3. 周末临近（周四/周五）→ 休息日 + 周复盘提醒
+    const wd=S.today().getDay();
+    if(wd===4 || wd===5){
+      out.push({id:'weekend', text:'周末快到了。周六是你的休息日，但记得花5分钟做个周复盘，看清这周落了几子、下周怎么走。'});
+    }
+    // 4. 目标临近预估截止（剩 30 天内）→ 进度提醒
+    st.goals.filter(g=>g.status==='active').forEach(g=>{
+      const rem=goalRemainingDays(g);
+      if(rem!==null && rem>0 && rem<=30){
+        const prog=g.status==='done'?100:Math.round(g.stageIndex/g.stages.length*100);
+        out.push({id:'deadline_'+g.id, text:`「${g.title}」还剩约 ${rem} 天。目前进度 ${prog}%。接下来每天多投入一点，稳稳推进。`});
+      }
+    });
+    return out;
+  }
+
+  // 主动推送预判到军师消息流（带每日冷却，避免刷屏）
+  function pushPredictions(){
+    const st=S.load();
+    const todayStr=S.fmtDate(S.today());
+    if(!st.predictShown) st.predictShown={};
+    predict().forEach(p=>{
+      if(st.predictShown[p.id]===todayStr) return;
+      st.predictShown[p.id]=todayStr;
+      S.pushLog('军师', p.text, 'predict');
+    });
+    S.save();
+  }
+
+  /* =========================================================
+     十、顺路清单（地点 → 任务库匹配 → 推送到今日）
+     ========================================================= */
+  const LOCATION_ROUTES = {
+    '图书馆':[
+      {title:'借阅计算机二级辅导书', duration:15, type:'byway', goalId:'g_computer'},
+      {title:'打印六级真题', duration:10, type:'byway', goalId:'g_cet6'},
+      {title:'图书馆安静处背30个单词', duration:15, type:'fragment', goalId:'g_cet6'}
+    ],
+    '打印店':[
+      {title:'打印六级真题 / 资料', duration:10, type:'byway', goalId:'g_cet6'}
+    ],
+    '超市':[
+      {title:'买水果（顺路）', duration:10, type:'byway'},
+      {title:'采购低卡零食', duration:10, type:'byway'}
+    ],
+    '健身房':[
+      {title:'力量训练30分钟', duration:30, type:'byway'}
+    ],
+    '学校':[
+      {title:'顺路问老师一个疑问', duration:10, type:'fragment'}
+    ],
+    '公司':[
+      {title:'利用碎片时间复盘今日任务', duration:10, type:'fragment'}
+    ],
+    '家':[
+      {title:'居家拉伸10分钟', duration:10, type:'evening'}
+    ]
+  };
+  function routeSuggestions(place){
+    if(!place || !place.trim()) return [];
+    const raw=place.trim();
+    const loc=matchLoc(raw) || raw;
+    let list=(LOCATION_ROUTES[loc]||[]).map(r=>({...r, source:'route', location:loc}));
+    // 同时匹配「未排程清单」里提到该地点的任务
+    S.unscheduled().forEach(t=>{
+      if(t.title.indexOf(loc)>=0 || (t.location && t.location.indexOf(loc)>=0)){
+        list.push({title:t.title, duration:t.duration, type:t.type, goalId:t.goalId, location:t.location||loc, source:'route-inbox', _id:t.id});
+      }
+    });
+    return list;
+  }
+
+  /* =========================================================
+     十一、军师战略报告 / 周报
+     ========================================================= */
+  function weeklyReport(){
+    const st=S.load();
+    const now=new Date(); const {year,week}=S.isoWeek(now);
+    const mon=new Date(now); mon.setDate(mon.getDate() - ((now.getDay()===0?6:now.getDay()-1)));
+    const days=[]; for(let i=0;i<7;i++) days.push(S.fmtDate(new Date(mon.getTime()+i*86400000)));
+    let total=0, done=0;
+    days.forEach(ds=>{ const arr=st.tasks[ds]||[]; total+=arr.length; done+=arr.filter(t=>t.done).length; });
+    const rate= total? Math.round(done/total*100):0;
+    const streak=st.undercover.streak;
+    const notes=st.notes.filter(n=>days.includes(n.date)).length;
+
+    const goals=st.goals.map(g=>{
+      const stage = g.status==='done'?'已完成':(g.stages[g.stageIndex]&&g.stages[g.stageIndex].name)||'进行中';
+      const prog=g.status==='done'?100:Math.round(g.stageIndex/g.stages.length*100);
+      return {title:g.title, status:g.status, stage, prog};
+    });
+
+    // 自动分析：本周各目标完成数 → 最大突破 / 最薄弱
+    const doneByGoal={};
+    days.forEach(ds=>{ (st.tasks[ds]||[]).forEach(t=>{ if(t.done && t.goalId){ doneByGoal[t.goalId]=(doneByGoal[t.goalId]||0)+1; } }); });
+    let biggest='', weakest='', bestN=0, worstN=1, worstD=0;
+    st.goals.filter(g=>g.status==='active').forEach(g=>{
+      const dn=doneByGoal[g.id]||0;
+      if(dn>bestN){ bestN=dn; biggest=g.title; }
+      // 该目标本周计划任务总数
+      let tot=0; days.forEach(ds=>{ tot+=S.tasksOf(ds).filter(t=>t.goalId===g.id).length; });
+      const undone=tot-dn;
+      if(tot>0 && undone>worstD){ worstD=undone; worstN=dn; weakest=g.title; }
+    });
+
+    const b = biggest? `本周最大突破是「${biggest}」，落子 ${bestN} 次，保持住这股劲。`
+                       : '本周还在铺路阶段，先把节奏稳住。';
+    const w = weakest && worstD>0? `「${weakest}」本周收尾偏慢，下周我会把它的任务拆得更小、排得更顺。`
+                                 : '各项目标推进均衡，没有明显短板。';
+
+    return { year, week, total, done, rate, streak, notes, goals, analysis:{biggest:b, weakest:w} };
+  }
+
+  /* =========================================================
+     十二、十年棋局（已完成目标落子时间轴）
+     ========================================================= */
+  const VISION_2036 = ['成为大人物'];
+  function tenYearMap(){
+    const st=S.load();
+    const start=2026, end=2036;
+    const years=[];
+    for(let y=start;y<=end;y++){
+      const goals=st.goals.filter(g=>g.status==='done' && g.completedAt && new Date(g.completedAt+'T00:00:00').getFullYear()===y)
+        .map(g=>({title:g.title, date:g.completedAt}));
+      years.push({year:y, goals});
+    }
+    return { years, vision:VISION_2036 };
+  }
+
+  /* =========================================================
+     十三、军师小贴士（大人物习惯 · 知识库 + 本周轮换）
+     ========================================================= */
+  function currentBigshot(){
+    const {week}=S.isoWeek(new Date());
+    return BIGSHOTS[(week-1)%BIGSHOTS.length];
+  }
+  function allBigshots(){ return BIGSHOTS; }
+
   window.ZQ.engine = {
     planFor, weeklyPlanFor, ensureDailyPlan, ensureWeekPlan, recordDrag, fridayBoost,
     strategistCommand, parseSentence, focusKeywords,
     refineNote, generateReview, recommendGoals, completeFeedback, undercoverNudge,
-    emotionResponse, maybeWeeklyBigshot, weekendNudge
+    emotionResponse, maybeWeeklyBigshot, weekendNudge,
+    predict, pushPredictions,
+    routeSuggestions, LOCATION_ROUTES,
+    weeklyReport, tenYearMap,
+    currentBigshot, allBigshots, goalRemainingDays
   };
 })();
