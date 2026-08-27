@@ -510,7 +510,7 @@
     if(calMode==='week'){
       E.ensureWeekPlan(calWeekCursor);
       const b=E.fridayBoost();
-      if(b.fired) toast('🎖️ 军师已备好「周末充电清单」，去「未排程」拖进周末吧');
+      if(b.fired) toast('军师已备好「周末充电清单」，去「未排程」拖进周末吧');
     }
     const segTabs=`<div class="seg-tabs">
       <button class="seg-tab ${calMode==='day'?'on':''}" data-cal="day">今日</button>
