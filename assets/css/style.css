@@ -791,3 +791,77 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 }
 .hint-card{background:rgba(197,180,227,.10);border:1px solid rgba(197,180,227,.32);}
 .hint-card .card-title{color:var(--purple-d);}
+
+/* ============================================================
+   v21 新增组件：预判 / 顺路 / 小贴士 / 会客厅 / 周报 / 十年棋局
+   ============================================================ */
+/* 军师预判卡（桃色，区别于今日指令的紫色） */
+.predict-card{
+  background:linear-gradient(135deg,rgba(242,210,182,.30),rgba(227,180,197,.20));
+  border:1px solid rgba(242,210,182,.6);
+}
+.predict-card .who{font-size:12px;color:var(--peach-d);font-weight:700;display:flex;align-items:center;gap:6px;margin-bottom:8px;}
+.predict-list{margin:0;padding-left:18px;}
+.predict-list li{font-size:13.5px;line-height:1.65;color:var(--ink);margin-bottom:5px;}
+.predict-list li:last-child{margin-bottom:0;}
+
+/* 本周小贴士卡（薄荷色） */
+.tip-card{
+  background:linear-gradient(135deg,rgba(180,227,212,.28),rgba(197,180,227,.18));
+  border:1px solid rgba(180,227,212,.6);
+}
+.tip-card .who{font-size:12px;color:var(--mint-d);font-weight:700;display:flex;align-items:center;gap:6px;margin-bottom:7px;}
+.tip-who{font-size:13.5px;font-weight:700;color:var(--ink);}
+.tip-habit{color:var(--mint-d);}
+.tip-txt{font-size:13.5px;line-height:1.6;margin-top:5px;color:var(--ink-2);}
+
+/* 顺路清单输入行 */
+.route-add{display:flex;align-items:center;gap:8px;margin:10px 0 2px;}
+.route-add .route-ic{font-size:17px;flex:none;}
+.route-add input{
+  flex:1;min-width:0;padding:11px 13px;border-radius:12px;border:1.5px solid var(--line-2);
+  background:var(--card);outline:none;transition:border .15s,box-shadow .15s;
+}
+.route-add input:focus{border-color:var(--mint);box-shadow:0 0 0 4px rgba(180,227,212,.18);}
+
+/* 顺路推荐弹窗 */
+.route-list{display:flex;flex-direction:column;gap:8px;}
+.route-opt{display:flex;align-items:flex-start;gap:9px;padding:11px 12px;background:var(--bg);border:1px solid var(--line-2);border-radius:12px;cursor:pointer;}
+.route-opt input{flex:none;margin-top:3px;width:17px;height:17px;accent-color:var(--mint-d);}
+.ro-title{font-size:14px;font-weight:600;flex:1;line-height:1.4;}
+.ro-meta{font-size:11.5px;color:var(--ink-3);margin-top:3px;}
+
+/* 军师会客厅（粉） */
+.comfort-card{
+  background:linear-gradient(135deg,rgba(227,180,197,.28),rgba(197,180,227,.18));
+  border:1px solid rgba(227,180,197,.6);
+}
+.comfort-card .who{font-size:12px;color:var(--pink-d);font-weight:700;display:flex;align-items:center;gap:6px;margin-bottom:7px;}
+.comfort-card .msg{font-size:14px;line-height:1.7;color:var(--ink);}
+.comfort-from{font-size:11.5px;color:var(--ink-3);margin-top:8px;}
+
+/* 周报 */
+.report-sub{font-size:12.5px;color:var(--purple-d);font-weight:700;margin-top:6px;}
+
+/* 十年棋局 */
+.ty-axis{display:flex;flex-direction:column;gap:2px;}
+.ty-year{display:flex;gap:12px;padding:9px 2px;align-items:stretch;}
+.ty-year:not(:last-child){border-bottom:1px dashed var(--line-2);}
+.ty-yr{flex:none;width:46px;font-size:15px;font-weight:800;color:var(--purple-d);align-self:center;text-align:center;}
+.ty-nodes{flex:1;display:flex;flex-direction:column;gap:6px;}
+.ty-node{display:flex;align-items:center;gap:9px;padding:8px 11px;background:var(--bg);border-radius:11px;}
+.ty-node.on{background:linear-gradient(135deg,rgba(180,227,212,.35),rgba(197,180,227,.25));border:1px solid rgba(180,227,212,.6);}
+.ty-node.ghost{opacity:.7;border:1px dashed var(--line-2);}
+.ty-dot{width:11px;height:11px;border-radius:50%;background:var(--mint);flex:none;box-shadow:0 0 0 3px rgba(180,227,212,.4);}
+.ty-node.ghost .ty-dot{background:var(--line-2);box-shadow:none;}
+.ty-label{font-size:14px;font-weight:700;color:var(--ink);flex:1;min-width:0;}
+.ty-date{font-size:11.5px;color:var(--ink-3);flex:none;}
+.ty-vision-card{background:linear-gradient(135deg,rgba(197,180,227,.22),rgba(242,210,182,.18));border:1px solid rgba(197,180,227,.45);text-align:center;}
+.ty-vision{font-size:17px;font-weight:800;color:var(--purple-d);letter-spacing:.5px;}
+
+/* 小贴士库 */
+.tip-item{border-left:4px solid var(--mint);}
+.tip-item.on{border-left-color:var(--purple);background:linear-gradient(135deg,rgba(197,180,227,.16),rgba(180,227,212,.14));}
+.tip-item .tip-who{font-size:15px;font-weight:750;color:var(--ink);}
+.tip-item .tip-habit{display:inline-block;margin:7px 0;font-size:13.5px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--mint),var(--mint-d));padding:4px 11px;border-radius:999px;}
+.tip-item .tip-txt{font-size:13.5px;line-height:1.6;color:var(--ink-2);}
