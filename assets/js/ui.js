@@ -48,19 +48,47 @@
     const tasks=S.tasksOf(todayStr).slice().sort((a,b)=>a.order-b.order);
     const allDone = tasks.length>0 && tasks.every(t=>t.done);
 
+    // 预判：主动比用户先想一步
+    const preds=E.predict();
+    const predictHTML = preds.length? `
+      <div class="card predict-card fade-in">
+        <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> 军师预判</div>
+        <ul class="predict-list">
+          ${preds.map(p=>`<li>${esc(p.text)}</li>`).join('')}
+        </ul>
+      </div>` : '';
+
+    // 本周大人物习惯（小贴士轮换）
+    const bs=E.currentBigshot();
+    const tipHTML = bs? `
+      <div class="card tip-card fade-in" id="tip-card">
+        <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> 本周小贴士</div>
+        <div class="tip-who">${esc(bs.who)} · <span class="tip-habit">${esc(bs.habit)}</span></div>
+        <div class="tip-txt">${esc(bs.tip)}</div>
+      </div>` : '';
+
     let html = `
       <div class="card strategist-cmd fade-in">
         <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> ${esc(cmd.who)}</div>
         <div class="msg">${esc(cmd.msg)}</div>
       </div>
 
+      ${predictHTML}
+
       <div class="quick-add">
         <input id="quick-input" placeholder="一句话生成待办，如：明早去图书馆背30个单词顺便打印资料" />
         <button class="btn primary" id="quick-add-btn">落子</button>
       </div>
 
-      <div class="divider"></div>
-      <div class="row between" style="margin:2px 2px 4px">
+      <div class="route-add">
+        <span class="route-ic">🚶</span>
+        <input id="route-input" placeholder="今天要去哪？如：图书馆" />
+        <button class="btn ghost sm" id="route-btn">顺路</button>
+      </div>
+
+      ${tipHTML}
+
+      <div class="row between mt12" style="margin:14px 2px 4px">
         <div class="card-title">♟️ 今日棋局</div>
         <div class="card-sub">${tasks.length} 项 · 拖动手柄可排序</div>
       </div>
@@ -130,6 +158,45 @@
     };
     $('#quick-add-btn').addEventListener('click',doAdd);
     qin.addEventListener('keydown',e=>{ if(e.key==='Enter') doAdd(); });
+
+    // 顺路清单：地点 → 匹配任务 → 弹窗选择加入今日
+    const routeInput=$('#route-input');
+    const doRoute=()=>{
+      const place=routeInput.value.trim(); if(!place){ toast('先说去哪～'); return; }
+      const list=E.routeSuggestions(place);
+      if(!list.length){ toast('暂未匹配到顺路任务，你可一句话添加'); return; }
+      const rows=list.map((r,i)=>`
+        <label class="route-opt">
+          <input type="checkbox" checked data-idx="${i}">
+          <span class="ro-title">${esc(r.title)}</span>
+          <span class="ro-meta">${r.duration}′ · ${TYPE_LABEL[r.type].split(' ')[0]}${r.goalId&&S.getGoal(r.goalId)?' · '+esc(S.getGoal(r.goalId).title):''}</span>
+        </label>`).join('');
+      modal('🚶 顺路任务推荐：'+esc(place),`
+        <p class="small muted">军师按地点为你挑了这些，勾选后加入今日棋局。</p>
+        <div class="route-list mt12">${rows}</div>
+        <button class="btn primary block mt12" id="route-add-all">加入今日棋局</button>
+      `,body=>{
+        body.querySelector('#route-add-all').addEventListener('click',()=>{
+          const checks=[...body.querySelectorAll('.route-opt input')];
+          let added=0;
+          checks.forEach(c=>{
+            if(!c.checked) return;
+            const r=list[+c.dataset.idx];
+            if(r.source==='route-inbox' && r._id){ S.setTaskDate(r._id, S.fmtDate(S.today())); }
+            else S.addTask(S.fmtDate(S.today()), {title:r.title, duration:r.duration, type:r.type, location:r.location, goalId:r.goalId||null, source:'route'});
+            added++;
+          });
+          closeModal(); renderToday();
+          toast(`已加入 ${added} 项顺路任务`);
+        });
+      });
+    };
+    $('#route-btn').addEventListener('click',doRoute);
+    routeInput.addEventListener('keydown',e=>{ if(e.key==='Enter') doRoute(); });
+
+    // 小贴士卡 → 跳转小贴士库
+    const tipCard=$('#tip-card');
+    if(tipCard) tipCard.addEventListener('click',()=>UI.navigate('tips'));
 
     // 勾选完成
     view.querySelectorAll('[data-check]').forEach(c=>{
@@ -338,6 +405,15 @@
         <div class="d-line" style="white-space:pre-wrap">${esc(d.content)}</div>
       </div>`).join(''):`<div class="empty"><div class="em">📔</div><p>还没有日记。<br>先记几笔随记，再一键整理成日记。</p></div>`;
 
+    // 军师会客厅：展示最近一条情绪回应（若有）
+    const comfortNote=st.notes.find(n=>n.comfort);
+    const comfortHTML = comfortNote? `
+      <div class="card comfort-card">
+        <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> 军师会客厅</div>
+        <div class="msg">${esc(comfortNote.comfort)}</div>
+        <div class="comfort-from">—— 回应你的随记：「${esc(comfortNote.text.slice(0,24))}${comfortNote.text.length>24?'…':''}」</div>
+      </div>` : '';
+
     view.innerHTML=`
       <div class="card">
         <div class="card-title">📝 随记</div>
@@ -347,6 +423,7 @@
           <button class="btn primary block" id="note-add">记下来</button>
         </div>
       </div>
+      ${comfortHTML}
       <div class="section-gap">${notesHtml}</div>
       <button class="btn mint block mb0 mt12" id="review-btn">🌙 一键整理今日随记为日记</button>
       <div class="card-title mt16" style="font-size:15px">📔 我的日记</div>
@@ -358,8 +435,9 @@
     $('#note-add').addEventListener('click',()=>{
       const v=$('#note-input').value.trim(); if(!v){ toast('写点什么'); return; }
       const note=S.addNote({text:v}); const r=E.refineNote(note);
-      S.updateNote(note.id,{emotion:r.emotion,points:r.points,taskId:r.taskId,refined:true});
-      const er=E.emotionResponse(note); if(er) S.pushLog('军师', er, 'comfort');
+      const er=E.emotionResponse(note);
+      S.updateNote(note.id,{emotion:r.emotion,points:r.points,taskId:r.taskId,refined:true,comfort:er||''});
+      if(er) S.pushLog('军师', er, 'comfort');
       $('#note-input').value=''; toast(r.suggestion||'已记录'); renderNotes();
     });
     $('#review-btn').addEventListener('click',()=>{
@@ -789,6 +867,82 @@
   }
 
   /* =========================================================
+     视图：周报（战略报告）
+     ========================================================= */
+  function renderReport(){
+    const r=E.weeklyReport();
+    const goalRows=r.goals.map(g=>`
+      <div class="bar-row"><span class="day" style="width:auto;flex:1;font-weight:600">${esc(g.title)}</span>
+        <div class="bar-track" style="flex:2"><i style="width:${g.prog}%;background:${g.status==='done'?'var(--mint)':'var(--purple)'}"></i></div>
+        <span class="pct">${g.status==='done'?'✓':esc(g.stage)}</span></div>`).join('');
+    view.innerHTML=`
+      <div class="card">
+        <div class="card-title"><img class="title-avatar" src="assets/img/strategist-avatar.png" alt=""> 执棋者·周报</div>
+        <div class="report-sub">第 ${r.week} 周 · 完成率 ${r.rate}%</div>
+        <div class="stat-grid mt12">
+          <div class="stat-card purple"><div class="num">${r.done}/${r.total}</div><div class="lab">本周落子</div></div>
+          <div class="stat-card pink"><div class="num">${r.rate}%</div><div class="lab">完成率</div></div>
+          <div class="stat-card mint"><div class="num">${r.streak}</div><div class="lab">连续天数</div></div>
+          <div class="stat-card blue"><div class="num">${r.notes}</div><div class="lab">随记条数</div></div>
+        </div>
+      </div>
+      <div class="card chart-card"><div class="card-title">目标进度</div>${goalRows}</div>
+      <div class="card hint-card">
+        <div class="card-title">军师点评</div>
+        <p class="small muted mt8">${esc(r.analysis.biggest)}</p>
+        <p class="small muted mt8">${esc(r.analysis.weakest)}</p>
+      </div>
+      <div class="card hint-card">
+        <div class="card-title">下周布局</div>
+        <p class="small muted mt8">主线按当前阶段继续推进；薄弱项我会加大排程比例。你只管照做，明天打开棋局看新指令。</p>
+      </div>`;
+  }
+
+  /* =========================================================
+     视图：十年棋局（成长长图）
+     ========================================================= */
+  function renderTimeline(){
+    const m=E.tenYearMap();
+    const yearsHtml=m.years.map(y=>{
+      const nodes=y.goals.length
+        ? y.goals.map(g=>`<div class="ty-node on"><span class="ty-dot"></span><span class="ty-label">${esc(g.title)}</span><span class="ty-date">${esc(g.date)}</span></div>`).join('')
+        : `<div class="ty-node ghost"><span class="ty-dot"></span><span class="ty-label muted">待落子</span></div>`;
+      return `<div class="ty-year">
+        <div class="ty-yr">${y.year}</div>
+        <div class="ty-nodes">${nodes}</div>
+      </div>`;
+    }).join('');
+    const visionHtml=m.vision.map(v=>`<div class="ty-vision">🏁 ${esc(v)}</div>`).join('');
+    view.innerHTML=`
+      <div class="card">
+        <div class="card-title">🗺️ 十年棋局</div>
+        <p class="small muted mt8">每完成一个目标，就在这里落下一子。看着自己走过的路，也看清离「大人物」还有多远。</p>
+      </div>
+      <div class="card ty-axis">${yearsHtml}</div>
+      <div class="card ty-vision-card">${visionHtml}<div class="muted small mt8">十年后你会成为大人物。但那个大人物的起点，就是今天这一颗小小的棋子。</div></div>`;
+  }
+
+  /* =========================================================
+     视图：小贴士（大人物习惯 · 知识库）
+     ========================================================= */
+  function renderTips(){
+    const list=E.allBigshots();
+    const cur=E.currentBigshot();
+    const items=list.map(b=>`
+      <div class="card tip-item ${b.who===cur.who?'on':''}">
+        <div class="tip-who">${esc(b.who)}</div>
+        <div class="tip-habit">${esc(b.habit)}</div>
+        <div class="tip-txt">${esc(b.tip)}</div>
+      </div>`).join('');
+    view.innerHTML=`
+      <div class="card reco-card">
+        <div class="card-title">💡 军师小贴士</div>
+        <p class="small muted mt8">每周轮换一位大人物的习惯，供你模仿学习。这周是 <b>${esc(cur.who)}</b>。</p>
+      </div>
+      <div class="section-gap">${items}</div>`;
+  }
+
+  /* =========================================================
      主渲染分发
      ========================================================= */
   function render(v){
@@ -799,6 +953,9 @@
     else if(current==='power') renderPower();
     else if(current==='undercover') renderUndercover();
     else if(current==='calendar') renderCalendar();
+    else if(current==='report') renderReport();
+    else if(current==='timeline') renderTimeline();
+    else if(current==='tips') renderTips();
     // 高亮导航：一级视图直接高亮；二级/三级视图回落到「更多」入口
     const primarySet={'today':1,'manual':1};
     const onMore = !primarySet[current];
