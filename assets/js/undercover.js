@@ -128,6 +128,8 @@
 
       pushSecret(`🕵️ 情报碎片 +1（共${u.intelFragments}）。今日棋局已清空，明日先手由我安排。`);
       S.save();
+      // 完成全部任务后，顺势再跑一次预判（可能有新的 deadline / 熬夜预警要推送）
+      if(window.ZQ.engine && window.ZQ.engine.pushPredictions) window.ZQ.engine.pushPredictions();
     }
   }
 
@@ -160,7 +162,7 @@
   /* 完成目标（由棋谱"完成目标"触发） */
   function completeGoal(goalId){
     const g=S.getGoal(goalId); if(!g) return;
-    S.updateGoal(goalId,{status:'done', progress:100});
+    S.updateGoal(goalId,{status:'done', progress:100, completedAt:S.fmtDate(S.today())});
     const st=S.load();
     const goalsDone=st.goals.filter(x=>x.status==='done').length;
     if(goalsDone>=1) awardTitle('breaker');
