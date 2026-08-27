@@ -1,11 +1,12 @@
 /* 执棋 · Service Worker —— 让 App 可安装、可离线，且「打开即更新」 */
-const CACHE = 'zhiqi-v18';
+const CACHE = 'zhiqi-v19';
 const CORE = [
   './', './index.html',
   './assets/css/style.css',
   './assets/js/store.js', './assets/js/engine.js',
   './assets/js/undercover.js', './assets/js/ui.js', './assets/js/app.js',
-  './assets/manifest.json', './assets/icon.svg'
+  './assets/manifest.json', './assets/icon.svg',
+  './assets/img/strategist-avatar.png'
 ];
 
 self.addEventListener('install', e=>{
