@@ -107,6 +107,13 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 }
 .icon-btn:active{transform:scale(.93);}
 
+/* 军师形象头像统一（v19：替换所有人物画像/对话框头像） */
+.icon-btn .hat{width:28px;height:28px;border-radius:50%;object-fit:cover;box-shadow:var(--shadow-sm);}
+.sheet-avatar{width:26px;height:26px;border-radius:50%;object-fit:cover;vertical-align:middle;}
+.who-avatar,.ttl-avatar,.title-avatar{width:20px;height:20px;border-radius:50%;object-fit:cover;vertical-align:middle;}
+.s-msg .av{overflow:hidden;}
+.s-msg .av img{width:100%;height:100%;object-fit:cover;}
+
 /* ---------- 底部导航（移动端） ---------- */
 .tabbar{
   position:fixed;left:0;right:0;bottom:0;z-index:30;
