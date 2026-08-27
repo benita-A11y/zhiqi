@@ -145,7 +145,8 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
   .sidebar .side-brand{display:flex;align-items:center;gap:10px;padding:6px 8px 16px;}
   .sidebar .side-brand .brand-mark{width:34px;height:34px;font-size:18px;}
   .sidebar .side-brand h1{font-size:17px;font-weight:700;}
-  .side-nav{flex:1;display:flex;flex-direction:column;gap:4px;overflow:auto;}
+  .side-nav{flex:0 1 auto;display:flex;flex-direction:column;gap:4px;overflow:auto;}
+  .side-foot{margin-top:auto;}
   .side-item{
     display:flex;align-items:center;gap:11px;padding:11px 13px;border-radius:13px;
     color:var(--ink-2);font-weight:600;font-size:14.5px;text-align:left;transition:background .15s,color .15s;
@@ -733,3 +734,53 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
   .week-card .cal-task .cal-tt{font-size:11px;line-height:1.3;max-height:2.7em;}
   .zone-empty{font-size:10px;padding:10px 0;}
 }
+
+/* ============================================================
+   导航分层重构（v18）：一级常驻 / 二级折叠 / 三级深层抽屉
+   ============================================================ */
+
+/* 侧边栏：折叠组（更多功能） */
+.side-collapse{margin-top:6px;border-top:1px solid var(--line);padding-top:8px;}
+.side-collapse-btn{
+  width:100%;display:flex;align-items:center;justify-content:space-between;
+  padding:10px 13px;border-radius:13px;color:var(--ink-2);font-weight:650;font-size:14px;
+  background:var(--bg);border:1px solid var(--line-2);transition:background .15s;
+}
+.side-collapse-btn:active{background:var(--line-2);}
+.side-collapse-btn .caret{transition:transform .2s;font-size:18px;font-weight:800;color:var(--purple-d);}
+.side-collapse-btn.open .caret{transform:rotate(90deg);}
+.side-collapse-body{margin-top:6px;display:flex;flex-direction:column;gap:2px;padding-left:8px;}
+.side-sub-title{font-size:11.5px;font-weight:700;color:var(--ink-3);margin:10px 2px 4px;letter-spacing:.3px;}
+.side-sub-title.muted{color:var(--ink-3);opacity:.85;}
+.side-sub{
+  display:flex;align-items:center;gap:11px;padding:9px 13px;border-radius:13px;
+  color:var(--ink-2);font-weight:600;font-size:14px;text-align:left;transition:background .15s,color .15s;
+}
+.side-sub span{font-size:18px;}
+.side-sub:hover{background:var(--bg);}
+.side-sub.active{color:var(--purple-d);background:rgba(197,180,227,.16);}
+
+/* 「更多」抽屉（移动端底部浮层） */
+.more-sheet{max-width:520px;}
+.more-body{padding:6px 18px 22px;}
+.more-sec{margin-top:14px;}
+.more-sec-title{font-size:12.5px;font-weight:800;color:var(--ink-2);margin-bottom:8px;letter-spacing:.4px;}
+.more-sec-title.muted{color:var(--ink-3);font-weight:700;}
+.more-item{
+  width:100%;display:flex;align-items:center;gap:13px;padding:14px 12px;border-radius:14px;
+  background:var(--card);border:1px solid var(--line);margin-bottom:9px;text-align:left;
+  transition:transform .1s,box-shadow .15s;box-shadow:var(--shadow-sm);
+}
+.more-item:active{transform:scale(.98);}
+.more-item .mi{font-size:22px;flex:none;width:30px;text-align:center;}
+.more-item .ml{font-size:15.5px;font-weight:700;color:var(--ink);}
+.more-item .md{margin-left:auto;font-size:12px;color:var(--ink-3);}
+.more-sec:last-child .more-item{background:var(--bg);box-shadow:none;opacity:.92;}
+
+/* 关于 / 提示卡 */
+.about-ver{
+  margin-top:16px;font-size:12px;color:var(--ink-3);background:var(--bg);
+  border-radius:10px;padding:10px 12px;text-align:center;
+}
+.hint-card{background:rgba(197,180,227,.10);border:1px solid rgba(197,180,227,.32);}
+.hint-card .card-title{color:var(--purple-d);}
