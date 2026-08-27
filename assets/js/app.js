@@ -1,5 +1,6 @@
 /* =========================================================
    执棋 · 启动与路由 (app.js)
+   —— 导航按优先级分层：一级常驻 / 二级折叠 / 三级深层抽屉
    ========================================================= */
 (function(){
   // 逃生舱：网址加 ?force=1 打开一次，强制注销旧 Service Worker 并清空缓存后重载，
@@ -18,28 +19,127 @@
   const UI = window.ZQ.ui;
   const $ = s=>document.querySelector(s);
 
+  /* ---------- 导航分层配置（权重分级的唯一真相源） ---------- */
+  // 一级：每日核心，常驻主导航
+  const NAV_PRIMARY = [
+    {view:'today',  icon:'♟️', label:'今日棋局'},
+    {view:'manual', icon:'📋', label:'棋谱'},
+  ];
+  // 二级：常用，收纳于「更多」抽屉的常用区
+  const NAV_SECONDARY = [
+    {view:'calendar', icon:'📅', label:'棋历'},
+    {view:'notes',    icon:'📝', label:'随记'},
+    {view:'power',    icon:'📊', label:'棋力'},
+  ];
+  // 三级：低频/附属，收敛于「工具箱」
+  const NAV_TERTIARY = [
+    {view:'undercover', icon:'🔐', label:'卧底档案'},
+    {action:'backup',   icon:'💾', label:'数据备份'},
+    {action:'about',    icon:'ℹ️', label:'关于执棋'},
+  ];
+  const ALL_VIEWS = [...NAV_PRIMARY, ...NAV_SECONDARY, ...NAV_TERTIARY].map(x=>x.view).filter(Boolean);
+
+  function navBtnHTML(item, cls){
+    const icon = item.icon?`<span>${item.icon}</span>`:'';
+    if(item.action) return `<button class="${cls}" data-action="${item.action}">${icon}${item.label}</button>`;
+    return `<button class="${cls}" data-view="${item.view}">${icon}${item.label}</button>`;
+  }
+
+  /* ---------- 侧边栏（桌面端）：一级常驻 + 更多折叠组 ---------- */
   function buildSidebar(){
     if($('.sidebar')) return;
     const el=document.createElement('aside');
     el.className='sidebar';
+    const primaryHTML = NAV_PRIMARY.map(x=>navBtnHTML(x,'side-item')).join('');
+    const secHTML = NAV_SECONDARY.map(x=>navBtnHTML(x,'side-sub')).join('');
+    const terHTML = NAV_TERTIARY.map(x=>navBtnHTML(x,'side-sub')).join('');
     el.innerHTML=`
       <div class="side-brand"><div class="brand-mark">♟</div><h1>执棋</h1></div>
-      <nav class="side-nav">
-        <button class="side-item" data-view="today"><span>♟️</span>今日棋局</button>
-        <button class="side-item" data-view="calendar"><span>📅</span>棋历</button>
-        <button class="side-item" data-view="manual"><span>📋</span>棋谱</button>
-        <button class="side-item" data-view="notes"><span>📝</span>随记</button>
-        <button class="side-item" data-view="power"><span>📊</span>棋力</button>
-        <button class="side-item" data-view="undercover"><span>🔐</span>卧底</button>
-      </nav>
+      <nav class="side-nav">${primaryHTML}</nav>
+      <div class="side-collapse">
+        <button class="side-collapse-btn" id="side-more-toggle">
+          <span>更多功能</span><span class="caret">›</span>
+        </button>
+        <div class="side-collapse-body" id="side-more-body" hidden>
+          <div class="side-sub-title">常用</div>
+          ${secHTML}
+          <div class="side-sub-title muted">工具箱</div>
+          ${terHTML}
+        </div>
+      </div>
       <div class="side-foot">每天落一子，十年成大局<br>你不是在打卡，是在卧底。</div>`;
     $('#app').appendChild(el);
-    el.querySelectorAll('.side-item').forEach(b=>b.addEventListener('click',()=>UI.navigate(b.dataset.view)));
+
+    el.querySelectorAll('.side-item,.side-sub').forEach(b=>{
+      b.addEventListener('click',()=>{
+        if(b.dataset.view) UI.navigate(b.dataset.view);
+        else if(b.dataset.action==='backup') openBackup();
+        else if(b.dataset.action==='about') openAbout();
+      });
+    });
+    $('#side-more-toggle').addEventListener('click',()=>{
+      const body=$('#side-more-body'); const open=body.hidden;
+      body.hidden=!open;
+      $('#side-more-toggle').classList.toggle('open', open);
+    });
   }
 
+  /* ---------- 底部「更多」抽屉（移动端） ---------- */
+  function openMore(){ $('#more-sheet').hidden=false; }
+  function closeMore(){ $('#more-sheet').hidden=true; }
+  function bindMore(){
+    // 底部标签：一级直接跳转，更多打开抽屉
+    document.querySelectorAll('.tab').forEach(t=>{
+      if(t.dataset.view==='more') return; // 单独处理
+      t.addEventListener('click',()=>UI.navigate(t.dataset.view));
+    });
+    const tab=document.querySelector('.tab[data-view="more"]');
+    if(tab) tab.addEventListener('click',openMore);
+    $('#close-more').addEventListener('click',closeMore);
+    $('#more-sheet').addEventListener('click',e=>{ if(e.target.id==='more-sheet') closeMore(); });
+    $('#more-sheet').querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{
+      UI.navigate(b.dataset.view); closeMore();
+    }));
+    $('#open-backup').addEventListener('click',()=>{ closeMore(); openBackup(); });
+    $('#open-about').addEventListener('click',()=>{ closeMore(); openAbout(); });
+  }
+
+  /* ---------- 数据备份（三级 · 原混在棋力） ---------- */
+  function openBackup(){ $('#backup-sheet').hidden=false; bindBackupOnce(); }
+  let _backupBound=false;
+  function bindBackupOnce(){
+    if(_backupBound) return; _backupBound=true;
+    $('#close-backup').addEventListener('click',()=>{ $('#backup-sheet').hidden=true; });
+    $('#backup-sheet').addEventListener('click',e=>{ if(e.target.id==='backup-sheet') $('#backup-sheet').hidden=true; });
+    $('#export-btn').addEventListener('click',()=>{
+      const data=S.exportJSON();
+      const blob=new Blob([data],{type:'application/json'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+      a.download='执棋备份_'+S.fmtDate(S.today())+'.json'; a.click(); UI.toast('已导出备份');
+    });
+    $('#import-btn').addEventListener('click',()=>$('#import-file').click());
+    $('#import-file').addEventListener('change',e=>{
+      const f=e.target.files[0]; if(!f) return;
+      const r=new FileReader();
+      r.onload=()=>{ try{ S.importJSON(r.result); UI.toast('导入成功'); UI.navigate(UI.current||'today'); $('#backup-sheet').hidden=true; }catch(err){ UI.toast('文件格式不对'); } };
+      r.readAsText(f);
+    });
+    $('#reset-btn').addEventListener('click',()=>{
+      if(confirm('确定要清空所有棋局、重新开始吗？建议先导出备份。')){ S.reset(); UI.toast('已重置'); UI.navigate('today'); $('#backup-sheet').hidden=true; }
+    });
+  }
+
+  /* ---------- 关于 ---------- */
+  function openAbout(){
+    $('#about-sheet').hidden=false;
+    const v=(window.ZQ && window.ZQ.__VER) || '';
+    $('#about-ver').textContent = v ? ('当前版本：'+v) : '离线版 · 数据本机保存';
+  }
+
+  /* ---------- 军师浮层（保留大脑入口，去除重复的「推荐新棋」） ---------- */
   function renderStrategistLog(){
     const st=S.load();
-    const box=$('#strategist-sheet')?$('#strategist-log'):null;
+    const box=$('#strategist-log');
     if(!box) return;
     if(!st.log.length){ box.innerHTML='<div class="muted small center" style="padding:20px">军师暂未派发指令。</div>'; return; }
     box.innerHTML=st.log.slice(0,40).map(l=>{
@@ -74,27 +174,6 @@
         <p class="small muted mt12">明早打开「今日棋局」，这些任务会自动就位。你也可以现在用一句话加任务。</p>`);
     });
 
-    $('#btn-new-goal-suggest').addEventListener('click',()=>{
-      const recos=E.recommendGoals();
-      const html=recos.map(r=>`
-        <div class="reco-item">
-          <h4>🎯 ${esc(r.title)} <span class="tag">${esc(r.cat)}</span></h4>
-          <div class="why">${esc(r.why)}</div>
-          <div class="analy">💡 ${esc(r.analyze)}（${esc(r.weekly)}）</div>
-          <div class="reco-foot"><span class="muted small">军师为你布的新棋</span>
-            <button class="btn primary sm" data-addreco="${esc(r.title)}">加入棋谱</button></div>
-        </div>`).join('');
-      UI.modal('🎖️ 军师布下的新棋',`<div>${html}</div>`,body=>{
-        body.querySelectorAll('[data-addreco]').forEach(b=>b.addEventListener('click',()=>{
-          S.addGoal({title:b.dataset.addreco,category:'推荐目标',type:'generic',color:'#C5B4E3',
-            current:'新棋局',target:'由军师陪你达成',dailyTime:20,weeklyDays:5,resources:'—',
-            stages:[{name:'起步',weeks:'第1-2周',core:'建立节奏'},{name:'积累',weeks:'第3-6周',core:'持续投入'},
-              {name:'突破',weeks:'第7-10周',core:'质变'},{name:'收官',weeks:'第11-12周',core:'成果'}]});
-          UI.closeModal(); UI.toast('已加入棋谱'); UI.navigate('manual');
-        }));
-      });
-    });
-
     $('#btn-strategist-dispatch').addEventListener('click',()=>{
       const todayStr=S.fmtDate(S.today());
       E.ensureDailyPlan(todayStr);
@@ -121,17 +200,16 @@
     welcome();
     buildSidebar();
     bindStrategist();
-
-    document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>UI.navigate(t.dataset.view)));
+    bindMore();
 
     const last=localStorage.getItem('zhiqi_lastview')||'today';
     UI.updateTopbar();
-    UI.navigate(last);
+    UI.navigate(ALL_VIEWS.includes(last)?last:'today');
 
     // PWA：仅在 http/https 下注册，file:// 直接打开同样可用
     if('serviceWorker' in navigator && location.protocol.indexOf('http')===0){
       // 注册 URL 带版本号：每次部署版本号变化，浏览器无法命中旧缓存，实现「打开即更新」
-      navigator.serviceWorker.register('sw.js?v=17').catch(()=>{});
+      navigator.serviceWorker.register('sw.js?v=18').catch(()=>{});
       // 新版本 Service Worker 接管后，自动刷新一次页面，让用户立即看到新内容
       let _reloaded=false;
       navigator.serviceWorker.addEventListener('controllerchange', ()=>{
