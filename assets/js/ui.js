@@ -58,13 +58,15 @@
         </ul>
       </div>` : '';
 
-    // 本周大人物习惯（小贴士轮换）
-    const bs=E.currentBigshot();
+    // 今日小贴士（每日轮换一位大人物的习惯）
+    const bs=E.dailyTip();
     const tipHTML = bs? `
       <div class="card tip-card fade-in" id="tip-card">
-        <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> 本周小贴士</div>
-        <div class="tip-who">${esc(bs.who)} · <span class="tip-habit">${esc(bs.habit)}</span></div>
-        <div class="tip-txt">${esc(bs.tip)}</div>
+        <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> 今日小贴士</div>
+        <div class="tip-who">${esc(bs.who)} <span class="tip-tag">${esc(bs.cat)}</span></div>
+        <div class="tip-role">${esc(bs.tag)}</div>
+        <div class="tip-habit">${esc(bs.habit)}</div>
+        <div class="tip-txt">军师：${esc(bs.tip)}</div>
       </div>` : '';
 
     let html = `
@@ -927,17 +929,18 @@
      ========================================================= */
   function renderTips(){
     const list=E.allBigshots();
-    const cur=E.currentBigshot();
+    const cur=E.dailyTip();
     const items=list.map(b=>`
       <div class="card tip-item ${b.who===cur.who?'on':''}">
-        <div class="tip-who">${esc(b.who)}</div>
+        <div class="tip-who">${esc(b.who)} <span class="tip-tag">${esc(b.cat)}</span></div>
+        <div class="tip-role">${esc(b.tag)}</div>
         <div class="tip-habit">${esc(b.habit)}</div>
-        <div class="tip-txt">${esc(b.tip)}</div>
+        <div class="tip-txt">军师：${esc(b.tip)}</div>
       </div>`).join('');
     view.innerHTML=`
       <div class="card reco-card">
         <div class="card-title">💡 军师小贴士</div>
-        <p class="small muted mt8">每周轮换一位大人物的习惯，供你模仿学习。这周是 <b>${esc(cur.who)}</b>。</p>
+        <p class="small muted mt8">来自商业大佬、投资家、作家、思想家与书中人物、科学家、运动员、自律明星。今日轮到 <b>${esc(cur.who)}</b>；全库共 <b>${list.length}</b> 条，每天换一位，慢慢收集属于你的习惯。</p>
       </div>
       <div class="section-gap">${items}</div>`;
   }
