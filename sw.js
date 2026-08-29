@@ -1,5 +1,5 @@
 /* 执棋 · Service Worker —— 让 App 可安装、可离线，且「打开即更新」 */
-const CACHE = 'zhiqi-v22';
+const CACHE = 'zhiqi-v23';
 const CORE = [
   './', './index.html',
   './assets/css/style.css',
@@ -32,17 +32,47 @@ self.addEventListener('fetch', e=>{
   // sw.js 自身交给浏览器默认处理，确保更新检查能拿到最新脚本
   if(url.pathname.endsWith('/sw.js')) return;
 
-  // 全部静态资源走 network-first：每次打开都优先拉取最新文件。
-  // 配合 index.html 里带 ?v=N 的资源引用——新版本号对老 Service Worker 是
-  // 缓存「未命中」，必然会去网络取新文件；老用户无需手动清缓存即可自动升级。
-  // 仅在「在线取数成功」时把最新内容写入缓存，网络失败时再回退缓存（离线可用）。
-  e.respondWith(
-    fetch(e.request).then(resp=>{
+  // 导航 / HTML 请求：network-first —— 壳永远是最新的，满足「打开即更新」
+  const isNav = e.request.mode === 'navigate'
+    || url.pathname === '/' || url.pathname.endsWith('/index.html');
+  if(isNav){
+    e.respondWith(
+      fetch(e.request).then(resp=>{
+        if(resp && resp.ok && url.origin === self.location.origin){
+          const cp = resp.clone();
+          caches.open(CACHE).then(c=>c.put(e.request, cp));
+        }
+        return resp;
+      }).catch(()=> caches.match(e.request).then(r=> r || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  // 其余静态资源：cache-first + 后台静默更新（stale-while-revalidate）
+  // 有缓存立即返回 → 秒开；同时在后台把最新内容写回缓存。
+  // 资源 URL 带 ?v=N：新版本号对旧缓存是「未命中」，自动去网络取新文件，
+  // 既秒开又不会锁死旧版本，离线时仍可回退缓存。
+  e.respondWith((async()=>{
+    const cached = await caches.match(e.request);
+    if(cached){
+      // 后台刷新缓存，不阻塞响应
+      fetch(e.request).then(r=>{
+        if(r && r.ok && url.origin === self.location.origin){
+          caches.open(CACHE).then(c=>c.put(e.request, r.clone()));
+        }
+      }).catch(()=>{});
+      return cached;
+    }
+    // 无缓存：走网络并写入
+    try{
+      const resp = await fetch(e.request);
       if(resp && resp.ok && url.origin === self.location.origin){
         const cp = resp.clone();
         caches.open(CACHE).then(c=>c.put(e.request, cp));
       }
       return resp;
-    }).catch(()=> caches.match(e.request).then(r=> r || caches.match('./index.html')))
-  );
+    }catch(err){
+      return caches.match('./index.html') || Response.error();
+    }
+  })());
 });
