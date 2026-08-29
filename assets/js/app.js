@@ -213,7 +213,7 @@
     // PWA：仅在 http/https 下注册，file:// 直接打开同样可用
     if('serviceWorker' in navigator && location.protocol.indexOf('http')===0){
       // 注册 URL 带版本号：每次部署版本号变化，浏览器无法命中旧缓存，实现「打开即更新」
-      navigator.serviceWorker.register('sw.js?v=21').catch(()=>{});
+      navigator.serviceWorker.register('sw.js?v=22').catch(()=>{});
       // 新版本 Service Worker 接管后，自动刷新一次页面，让用户立即看到新内容
       let _reloaded=false;
       navigator.serviceWorker.addEventListener('controllerchange', ()=>{
