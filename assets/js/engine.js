@@ -548,28 +548,61 @@
     '代码':'代码每天写一点，手感不能凉。'
   };
 
-  function refineNote(note){
-    const text = note.text || '';
-    let emotion='flat';
-    if(EMOTION.bad.some(w=>text.indexOf(w)>=0)) emotion='bad';
-    else if(EMOTION.good.some(w=>text.indexOf(w)>=0)) emotion='good';
+  /* 随记重点抓取：关键词匹配 → 多层语义抽取（主题/阻碍/动作/数量/时间地点/程度）
+     opts.readonly=true 时只分析不写入建议记忆（供渲染展示反复调用） */
+  function refineNote(note, opts){
+    const text = (note && note.text) || '';
+    const readonly = !!(opts && opts.readonly);
 
-    const points=[];
-    WEAK_KW.forEach(k=>{ if(text.indexOf(k)>=0) points.push(k); });
+    // ① 军师大脑：结构化抽取（21 类情绪 + 19 类主题 + 9 类阻碍 + 数量指标）
+    let ex = null;
+    try{ ex = B.extract(text); }catch(e){ ex = null; }
 
-    // 关联到今日任务
+    // ② 兜底：brain 不可用时退回原关键词逻辑
+    if(!ex){
+      let emotion = 'flat';
+      if(EMOTION.bad.some(w=>text.indexOf(w)>=0)) emotion='down';
+      else if(EMOTION.good.some(w=>text.indexOf(w)>=0)) emotion='happy';
+      const pts = []; WEAK_KW.forEach(k=>{ if(text.indexOf(k)>=0) pts.push(k); });
+      ex = { emotion, topics:pts, blockers:[], actions:[], metrics:[], points:pts,
+             intensity:1, summary: pts[0] || '' };
+    }
+
+    const keys = (ex.topics && ex.topics.length) ? ex.topics : (ex.points || []);
+
+    // ③ 关联到今日任务（用主题词匹配任务标题或所属目标名）
     const st = S.load();
     const todayStr = S.fmtDate(S.today());
-    let taskId=null;
-    if(points.length){
+    let taskId = null;
+    if(keys.length){
       const todays = S.tasksOf(todayStr);
-      for(const k of points){
-        const hit = todays.find(t=> t.title.indexOf(k)>=0 || (t.goalId && st.goals.find(g=>g.id===t.goalId && g.title.indexOf(k)>=0)) );
-        if(hit){ taskId=hit.id; break; }
+      for(const k of keys){
+        const hit = todays.find(t=> t.title.indexOf(k)>=0
+          || (t.goalId && st.goals.find(g=>g.id===t.goalId && g.title.indexOf(k)>=0)));
+        if(hit){ taskId = hit.id; break; }
       }
     }
-    const suggestion = points.length? SUGGEST[points[0]] : '继续记录，军师会慢慢读懂你。';
-    return { emotion, points, taskId, suggestion };
+
+    // ④ 建议：去重 + 递进（同一主题第二次遇到给进阶解法，不再复读同一句）
+    let sg = null;
+    try{ sg = B.suggest(ex, readonly); }catch(e){ sg = null; }
+    const suggestion = (sg && sg.text) ? sg.text
+      : (keys.length ? (SUGGEST[keys[0]] || '继续记录，军师会慢慢读懂你。') : '继续记录，军师会慢慢读懂你。');
+
+    return {
+      emotion: ex.emotion || 'flat',
+      points: keys,
+      taskId, suggestion,
+      // 结构化重点：让"军师抓到了什么"看得见
+      topics:   ex.topics   || [],
+      blockers: ex.blockers || [],
+      actions:  ex.actions  || [],
+      metrics:  ex.metrics  || [],
+      when: ex.when || null, where: ex.where || null,
+      intensity: ex.intensity || 1,
+      summary: ex.summary || '',
+      adviceLevel: sg? sg.level : 0
+    };
   }
 
   /* =========================================================
@@ -793,6 +826,11 @@
     return '';
   }
 
+  /* 任务拆解建议（透传军师大脑，供长任务卡片展示「怎么下手」） */
+  function decompose(t){
+    try{ return B.decompose(t); }catch(e){ return { title:(t&&t.title)||'', steps:[] }; }
+  }
+
   /* =========================================================
      九、军师「预判」系统（比用户先想一步）
      行为数据 → 规则引擎 → 触发预判 → 今日卡片 + 主动推送
@@ -1008,7 +1046,7 @@
     emotionResponse, maybeWeeklyBigshot, weekendNudge,
     predict, pushPredictions,
     routeSuggestions, LOCATION_ROUTES,
-    weeklyReport, tenYearMap,
+    weeklyReport, tenYearMap, decompose,
     currentBigshot, allBigshots, dailyTip, goalRemainingDays
   };
 })();
