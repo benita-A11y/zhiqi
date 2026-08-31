@@ -875,3 +875,82 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 .report-lab.good{color:#2f6b52;background:rgba(180,227,212,.34);border:1px solid rgba(180,227,212,.7);}
 .report-lab.bad{color:#8a5a3c;background:rgba(242,210,182,.32);border:1px solid rgba(242,210,182,.75);}
 .intel.nba{background:rgba(180,227,212,.18);border:1px solid rgba(180,227,212,.42);border-radius:10px;padding:8px 10px;line-height:1.6;}
+
+/* 随记结构化重点标签（让「军师抓到了什么」看得见） */
+.refine-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:7px;}
+.refine-box .rt{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;line-height:1.75;white-space:nowrap;}
+.refine-box .rt.topic{color:#fff;background:linear-gradient(135deg,var(--purple),var(--purple-d));}
+.refine-box .rt.blocker{color:#8a5a3c;background:rgba(242,210,182,.34);border:1px solid rgba(242,210,182,.8);}
+.refine-box .rt.metric{color:var(--blue-d);background:rgba(180,212,227,.30);border:1px solid rgba(180,212,227,.7);}
+.refine-box .rt.action{color:#2f6b52;background:rgba(180,227,212,.30);border:1px solid rgba(180,227,212,.7);}
+.refine-box .rt.when,.refine-box .rt.where{color:var(--ink-2);background:rgba(163,157,174,.14);border:1px solid var(--line-2);}
+.refine-box .rt.lv{margin-left:6px;color:var(--purple-d);background:rgba(197,180,227,.20);border:1px solid rgba(197,180,227,.5);}
+.refine-advice{line-height:1.6;}
+.refine-linked{margin-top:6px;font-size:11.5px;color:var(--ink-3);}
+
+/* 内容密集页：收起顶栏品牌区，把垂直空间还给内容，同时与其它页面形成区分 */
+body.dense-view .topbar{padding:7px 14px;gap:8px;}
+body.dense-view .brand-text{display:none;}
+body.dense-view .brand-mark{width:30px;height:30px;font-size:16px;border-radius:9px;}
+body.dense-view .view{padding-top:10px;}
+
+/* 触屏设备没有 hover —— 操作按钮必须常驻，否则永远点不到编辑/删除 */
+@media(hover:none){
+  .task-actions{opacity:1;}
+}
+
+/* ---------- 任务卡片自适应：紧凑 / 标准 / 展开 ---------- */
+.task.compact{padding:9px 12px;align-items:center;gap:9px;}
+.task.compact .task-title{font-size:14px;}
+.task.compact .task-handle{width:14px;font-size:13px;padding-top:0;}
+.task.compact .check{margin-top:0;}
+.task-dur{
+  flex:none;font-size:11.5px;font-weight:700;color:var(--ink-3);
+  background:rgba(163,157,174,.13);border-radius:999px;padding:2px 8px;
+}
+.task.done .task-dur{opacity:.5;}
+
+.task.expanded{padding:13px 14px 10px;}
+.task-steps{
+  margin-top:9px;padding-top:9px;border-top:1px dashed var(--line-2);
+  display:flex;flex-direction:column;gap:5px;
+}
+.ts-row{display:flex;align-items:flex-start;gap:7px;font-size:12px;color:var(--ink-2);line-height:1.5;}
+.ts-row i{
+  flex:none;width:16px;height:16px;border-radius:50%;
+  background:rgba(197,180,227,.30);color:var(--purple-d);
+  font-size:10px;font-style:normal;font-weight:800;
+  display:grid;place-items:center;margin-top:1px;
+}
+.task.done .task-steps{display:none;}
+
+/* ---------- 棋历：本周重点折叠条 ---------- */
+.wf-collapse{
+  display:flex;align-items:center;gap:8px;width:100%;
+  padding:9px 11px;background:var(--bg);border:1px solid var(--line-2);
+  border-radius:11px;transition:border-color .15s,background .15s;
+}
+.wf-collapse:active{transform:scale(.99);}
+.wf-icon{font-size:13px;flex:none;}
+.wf-label{font-size:12.5px;font-weight:800;color:var(--purple-d);flex:none;}
+.wf-preview{
+  flex:1;min-width:0;font-size:12px;color:var(--ink-2);
+  text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.wf-preview .wf-ph{color:var(--ink-3);}
+.wf-arrow{flex:none;color:var(--ink-3);font-size:15px;transition:transform .18s;}
+.wf-arrow.open{transform:rotate(90deg);}
+.week-focus-panel.open .wf-collapse{border-color:rgba(197,180,227,.55);background:rgba(197,180,227,.08);}
+
+/* ---------- 栅格工具：让同类卡片能并排，减少整页长滚动 ---------- */
+.grid{display:grid;gap:12px;}
+@media(min-width:768px){ .grid.g2{grid-template-columns:repeat(2,1fr);} }
+@media(min-width:1100px){ .grid.g3{grid-template-columns:repeat(3,1fr);} }
+
+/* 已完成折叠开关：一条轻量的分隔操作，不抢任务的视觉重量 */
+.fold-done-btn{
+  display:block;width:100%;margin:2px 0 10px;padding:8px 12px;
+  background:rgba(180,227,212,.16);border:1px dashed rgba(180,227,212,.75);
+  border-radius:11px;font-size:12.5px;font-weight:700;color:#2f6b52;
+}
+.fold-done-btn:active{transform:scale(.99);background:rgba(180,227,212,.28);}
