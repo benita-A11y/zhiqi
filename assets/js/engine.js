@@ -5,6 +5,7 @@
    ============================================================ */
 (function(){
   const S = window.ZQ.store;
+  const B = window.ZQ.brain;   // 军师大脑：情境向量 / 分析算法 / 规则矩阵 / 话术库
 
   /* =========================================================
      一、周计划生成器（目标 → 阶段 → 周任务）
@@ -386,44 +387,46 @@
     return null;
   }
 
+  /* 薄弱点 → 具体打法（领域知识层） */
+  const WEAK_TIP = {
+    '连读':'听力连读还是你的老对手，今天精听多停一下连读处。',
+    '听力':'听力是短板，精听时把听到的写下来再对照。',
+    '阅读':'阅读注意先题后文，定位句圈出来。',
+    '写作':'写作先搭框架，再填内容。',
+    '翻译':'翻译先直译再调语序。',
+    '单词':'单词靠重复，碎片时间多过几遍。',
+    '错题':'错题今天必须消化，别留到明天。',
+    '操作':'操作题按步骤拿分，先保流程。',
+    '体重':'体重管理先从「记录」开始，不用急着饿。',
+    '吃':'今天留意晚餐，少油少糖。',
+    '睡':'睡好才能记牢，今晚早点躺。',
+    '面试':'形象和表达一起练，每天一点点。',
+    '申论':'申论卷面分很贵，每天练几行字。',
+    '行测':'行测靠刷题手感，每天保持。',
+    '数学':'数学先补基础概念。'
+  };
+
   function strategistCommand(dateStr){
     const st = S.load();
-    const d = new Date(dateStr+'T00:00:00');
-    const wd = S.weekdayCN[d.getDay()];
+    // ① 军师大脑：情境向量 + 规则矩阵 → 决定「今天该说什么」
+    //    涵盖：主线目标进度 / 断档风险 / 情绪告急 / 难度自适应 / 时段 / 日历节奏 / 连续天数
+    let msg = '';
+    try{ const b = B.command(dateStr); if(b && b.msg) msg = b.msg; }catch(e){ msg = ''; }
+
+    // ② 领域层：brain 决定"何时说"，这里补"怎么打"——针对主目标阶段的实战建议
     const active = st.goals.filter(g=>g.status==='active');
     const lines = [];
-    // 主指令：聚焦当前最核心目标（按阶段进度）
     const focus = active[0];
     if(focus){
       const stage = focus.stages[focus.stageIndex];
-      const tip = (FOCUS_TIP[focus.type]&&FOCUS_TIP[focus.type][stage.name]) || '今天照计划走，稳一点。';
-      lines.push(`「${focus.title}·${stage.name}」第${S.weekOf(focus.createdAt)}周。${tip}`);
+      const tip = (FOCUS_TIP[focus.type] && FOCUS_TIP[focus.type][stage.name]) || '';
+      if(tip) lines.push(tip);
     }
     const weak = weakPointOf(dateStr);
-    if(weak){
-      const map = {'连读':'听力连读还是你的老对手，今天精听多停一下连读处。',
-        '听力':'听力是短板，精听时把听到的写下来再对照。',
-        '阅读':'阅读注意先题后文，定位句圈出来。',
-        '写作':'写作先搭框架，再填内容。',
-        '翻译':'翻译先直译再调语序。',
-        '单词':'单词靠重复，碎片时间多过几遍。',
-        '错题':'错题今天必须消化，别留到明天。',
-        '操作':'操作题按步骤拿分，先保流程。',
-        '体重':'体重管理先从「记录」开始，不用急着饿。',
-        '吃':'今天留意晚餐，少油少糖。',
-        '睡':'睡好才能记牢，今晚早点躺。',
-        '面试':'形象和表达一起练，每天一点点。',
-        '申论':'申论卷面分很贵，每天练几行字。',
-        '行测':'行测靠刷题手感，每天保持。',
-        '数学':'数学先补基础概念。'};
-      lines.push(map[weak]||`注意你的薄弱点「${weak}」。`);
-    }
-    if(st.undercover.streak>=3){
-      lines.push(`连续 ${st.undercover.streak} 天落子，节奏很漂亮，保持。`);
-    } else if(st.undercover.streak===0 && st.undercover.lastCompletedDate){
-      lines.push('昨天你失联了。今天只做一个最小的任务，哪怕5分钟，先回来。');
-    }
-    const msg = lines.join(' ') || '今天先落一子，后面我替你安排。';
+    if(weak) lines.push(WEAK_TIP[weak] || `注意你的薄弱点「${weak}」。`);
+
+    if(lines.length) msg += (msg? ' ' : '') + lines.join(' ');
+    if(!msg) msg = '今天先落一子，后面我替你安排。';
     return { who:'摆渡人指令', msg };
   }
 
@@ -580,7 +583,14 @@
     {kw:['骄傲','搞定','完成','开心','进步','爽','稳了','牛'], msg:'做得很好。但真正的棋手从不因一子得失而动摇。稳住。后面还有更大的局。'}
   ];
   function emotionResponse(note){
-    const text = (note&&note.text)||'';
+    if(!note) return null;
+    // ① 军师大脑：按情绪分类回应（20 类情绪 × 多套话术，并叠加「情绪告急」时的减量安抚）
+    try{
+      const r = B.emotionReply(note);
+      if(r) return r;
+    }catch(e){ /* 大脑不可用时走兜底 */ }
+    // ② 兜底：关键词匹配（原有 5 类）
+    const text = note.text||'';
     for(const e of EMOTION_RESPONSE){
       if(e.kw.some(w=>text.indexOf(w)>=0)) return e.msg;
     }
@@ -754,11 +764,10 @@
      ========================================================= */
   function completeFeedback(){
     const st = S.load();
-    const streak = st.undercover.streak;
-    let msg = '📨 棋子已落。今天你压了「拖延」一头。';
-    if(streak>=30) msg = '📨 三十天如一日。你已不是"在打卡的人"，你是"在下棋的人"。';
-    else if(streak>=7) msg = '📨 连续7天，暗行无阻。这股劲，十年后回头看就是分水岭。';
-    else if(streak>=3) msg = '📨 节奏很稳。你已解锁下一阶段的底气，新指令已就位。';
+    // 军师大脑：按「完成率 7 档」×「连续天数节点」生成反馈（原为 4 档，现细分到 0%/低/中/高/全清/超额）
+    let fb = null;
+    try{ fb = B.feedback(); }catch(e){ fb = null; }
+    let msg = (fb && fb.msg)? fb.msg : '📨 棋子已落。今天你压了「拖延」一头。';
 
     const intel = st.undercover.intelFragments;
     const next = (()=>{
@@ -767,7 +776,12 @@
       const t = S.tasksOf(tm).filter(x=>x.source==='auto')[0];
       return t? `明天先手：${t.title}。` : '明天先手由我安排。';
     })();
-    return { msg, intel, next };
+
+    // 下一步最优行动：优先级算法（紧急×滞后×弱项×时长）算出「现在最该做哪一件」
+    let nba = '';
+    try{ const a = B.nextBestAction(); if(a && a.text) nba = a.text; }catch(e){ nba = ''; }
+
+    return { msg, intel, next, nba, rate: fb? fb.rate : 0, bucket: fb? fb.bucket : '' };
   }
 
   /* 推进感：基于行为给一句"卧底任务" */
@@ -814,6 +828,16 @@
   }
 
   function predict(){
+    // ① 军师大脑：26 条规则矩阵全量命中（情境向量 → 规则 → 话术），按优先级取前 4 条
+    //    覆盖：断档风险 / 情绪告急 / 连续中断 / 冷启动 / 难度自适应 / 熬夜 / 弱项卡壳 /
+    //          任务超载 / 完美主义卡住 / 目标倒计时 / 目标滞后·超前 / 偏科 / 未复盘 /
+    //          拖延指数 / 趋势涨跌 / 黄金时段 / 夜间占比 / 强项 / 碎片未用 / 日历节奏
+    try{
+      const out = B.predictions(4);
+      if(out && out.length) return out;
+    }catch(e){ /* 大脑不可用时走兜底 */ }
+
+    // ② 兜底：原 4 条基础规则
     const st=S.load();
     const out=[];
     const u=st.undercover;
@@ -936,7 +960,20 @@
     const w = weakest && worstD>0? `「${weakest}」本周收尾偏慢，下周我会把它的任务拆得更小、排得更顺。`
                                  : '各项目标推进均衡，没有明显短板。';
 
-    return { year, week, total, done, rate, streak, notes, goals, analysis:{biggest:b, weakest:w} };
+    // 军师大脑：多因子深度分析（亮点 / 问题 / 下周布局 / 关键指标）
+    // 因子含：完成率趋势、黄金时段、夜间占比、拖延指数、断档风险、强项弱项、目标健康度
+    let deep = null;
+    try{ deep = B.deepAnalysis(); }catch(e){ deep = null; }
+
+    const analysis = { biggest:b, weakest:w };
+    if(deep){
+      analysis.good  = deep.good  || [];
+      analysis.bad   = deep.bad   || [];
+      analysis.next  = deep.next  || [];
+      analysis.stats = deep.stats || {};
+    }
+
+    return { year, week, total, done, rate, streak, notes, goals, analysis };
   }
 
   /* =========================================================
