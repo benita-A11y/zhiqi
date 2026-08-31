@@ -105,6 +105,7 @@
         <div class="ttl"><img class="ttl-avatar" src="assets/img/strategist-avatar.png" alt=""> 军师回执</div>
         <div class="msg">${esc(fb.msg)}</div>
         <div class="intel">🕵️ 情报碎片 ${fb.intel} · ${esc(fb.next)}</div>
+        ${fb.nba?`<div class="intel nba">🎯 ${esc(fb.nba)}</div>`:''}
         ${nudge?`<div class="intel">${esc(nudge)}</div>`:''}
       </div>`;
     }
@@ -873,6 +874,7 @@
      ========================================================= */
   function renderReport(){
     const r=E.weeklyReport();
+    const a=r.analysis||{};
     const goalRows=r.goals.map(g=>`
       <div class="bar-row"><span class="day" style="width:auto;flex:1;font-weight:600">${esc(g.title)}</span>
         <div class="bar-track" style="flex:2"><i style="width:${g.prog}%;background:${g.status==='done'?'var(--mint)':'var(--purple)'}"></i></div>
@@ -891,12 +893,16 @@
       <div class="card chart-card"><div class="card-title">目标进度</div>${goalRows}</div>
       <div class="card hint-card">
         <div class="card-title">军师点评</div>
-        <p class="small muted mt8">${esc(r.analysis.biggest)}</p>
-        <p class="small muted mt8">${esc(r.analysis.weakest)}</p>
+        <p class="small muted mt8">${esc(a.biggest||'')}</p>
+        <p class="small muted mt8">${esc(a.weakest||'')}</p>
+        ${a.good&&a.good.length? `<div class="mt12"><div class="report-lab good">做得好</div>${a.good.map(x=>`<p class="small mt8">· ${esc(x)}</p>`).join('')}</div>`:''}
+        ${a.bad&&a.bad.length? `<div class="mt12"><div class="report-lab bad">要注意</div>${a.bad.map(x=>`<p class="small mt8">· ${esc(x)}</p>`).join('')}</div>`:''}
       </div>
       <div class="card hint-card">
         <div class="card-title">下周布局</div>
-        <p class="small muted mt8">主线按当前阶段继续推进；薄弱项我会加大排程比例。你只管照做，明天打开棋局看新指令。</p>
+        ${a.next&&a.next.length
+          ? a.next.map(x=>`<p class="small muted mt8">· ${esc(x)}</p>`).join('')
+          : '<p class="small muted mt8">主线按当前阶段继续推进；薄弱项我会加大排程比例。你只管照做，明天打开棋局看新指令。</p>'}
       </div>`;
   }
 
