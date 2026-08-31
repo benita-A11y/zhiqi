@@ -114,36 +114,97 @@
     bindToday(tasks);
   }
 
+  let showDoneTasks=false;   // 任务多时：默认收起「已完成」，把视线留给还没做的事
+
   function renderTaskList(tasks){
     if(tasks.length===0) return `<div class="empty"><div class="em">♟️</div><p>今日棋局空空如也。<br>说一句话，或点开军师头像让军师派发任务。</p></div>`;
+
+    // 长列表减负：已完成 ≥3 且总数 ≥6 时，把已完成的折叠成一行
+    const doneN = tasks.filter(t=>t.done).length;
+    const foldDone = (doneN>=3 && tasks.length>=6 && !showDoneTasks);
+    const shown = foldDone ? tasks.filter(t=>!t.done) : tasks;
+
     let html=''; let lastType=null;
-    tasks.forEach(t=>{
+    shown.forEach(t=>{
       if(t.type!==lastType){
         const cnt=tasks.filter(x=>x.type===t.type).length;
         html += `<div class="group-label"><span class="bar"></span>${TYPE_LABEL[t.type]}<span class="cnt">${cnt}项</span></div>`;
         lastType=t.type;
       }
       const g = t.goalId?S.getGoal(t.goalId):null;
-      html += `
-      <div class="task ${t.done?'done':''}" data-sortable data-id="${t.id}">
-        <div class="task-handle">⠿</div>
-        <div class="check ${t.done?'on':''}" data-check="${t.id}"></div>
-        <div class="task-main">
-          <div class="task-title">${esc(t.title)}</div>
-          <div class="task-meta">
-            <span class="mini">⏱ ${t.duration}分钟</span>
-            ${t.location?`<span class="mini">📍 ${esc(t.location)}</span>`:''}
-            ${typeTag(t.type)}
-            ${g?goalTag(t.goalId):''}
-            ${t.time?`<span class="mini">🕒 ${esc(t.time)}</span>`:''}
-          </div>
-        </div>
+      const dur = t.duration || 15;
+      const hasExtra = !!(t.location || t.time || g);
+
+      /* 自适应档位：按「时长 + 信息量」决定卡片尺寸，不搞一刀切
+         compact  ≤10分钟且无附加信息 → 一行搞定，省空间
+         expanded ≥40分钟 或 需要整块时间的晚间任务 → 多给一行「怎么下手」
+         其余     → 标准两行                                          */
+      let size = 'normal';
+      if(dur <= 10 && !hasExtra) size = 'compact';
+      else if(dur >= 40 || t.type === 'evening') size = 'expanded';
+
+      const actions = `
         <div class="task-actions">
           <button data-edit="${t.id}" title="编辑">✎</button>
           <button data-del="${t.id}" title="删除">🗑</button>
-        </div>
-      </div>`;
+        </div>`;
+
+      if(size === 'compact'){
+        html += `
+        <div class="task compact ${t.done?'done':''}" data-sortable data-id="${t.id}">
+          <div class="task-handle">⠿</div>
+          <div class="check ${t.done?'on':''}" data-check="${t.id}"></div>
+          <div class="task-main"><div class="task-title">${esc(t.title)}</div></div>
+          <span class="task-dur">${dur}′</span>
+          ${actions}
+        </div>`;
+      } else if(size === 'expanded'){
+        const d = E.decompose(t) || { steps:[] };
+        const steps = (d.steps||[]).slice(0,3).map((s,i)=>
+          `<div class="ts-row"><i>${i+1}</i><span>${esc(s)}</span></div>`).join('');
+        html += `
+        <div class="task expanded ${t.done?'done':''}" data-sortable data-id="${t.id}">
+          <div class="task-handle">⠿</div>
+          <div class="check ${t.done?'on':''}" data-check="${t.id}"></div>
+          <div class="task-main">
+            <div class="task-title">${esc(t.title)}</div>
+            <div class="task-meta">
+              <span class="mini">⏱ ${dur}分钟</span>
+              ${typeTag(t.type)}
+              ${g?goalTag(t.goalId):''}
+              ${t.location?`<span class="mini">📍 ${esc(t.location)}</span>`:''}
+              ${t.time?`<span class="mini">🕒 ${esc(t.time)}</span>`:''}
+            </div>
+            ${steps?`<div class="task-steps">${steps}</div>`:''}
+          </div>
+          ${actions}
+        </div>`;
+      } else {
+        html += `
+        <div class="task ${t.done?'done':''}" data-sortable data-id="${t.id}">
+          <div class="task-handle">⠿</div>
+          <div class="check ${t.done?'on':''}" data-check="${t.id}"></div>
+          <div class="task-main">
+            <div class="task-title">${esc(t.title)}</div>
+            <div class="task-meta">
+              <span class="mini">⏱ ${dur}分钟</span>
+              ${t.location?`<span class="mini">📍 ${esc(t.location)}</span>`:''}
+              ${typeTag(t.type)}
+              ${g?goalTag(t.goalId):''}
+              ${t.time?`<span class="mini">🕒 ${esc(t.time)}</span>`:''}
+            </div>
+          </div>
+          ${actions}
+        </div>`;
+      }
     });
+
+    // 折叠/展开已完成的开关
+    if(foldDone){
+      html += `<button class="fold-done-btn" id="toggle-done">展开已完成的 ${doneN} 项 ▾</button>`;
+    } else if(doneN>=3 && showDoneTasks){
+      html += `<button class="fold-done-btn" id="toggle-done">收起已完成的 ${doneN} 项 ▴</button>`;
+    }
     return html;
   }
 
@@ -161,6 +222,10 @@
     };
     $('#quick-add-btn').addEventListener('click',doAdd);
     qin.addEventListener('keydown',e=>{ if(e.key==='Enter') doAdd(); });
+
+    // 展开 / 收起「已完成」（把视线留给还没做的事）
+    const td=$('#toggle-done');
+    if(td) td.addEventListener('click',()=>{ showDoneTasks=!showDoneTasks; renderToday(); });
 
     // 顺路清单：地点 → 匹配任务 → 弹窗选择加入今日
     const routeInput=$('#route-input');
@@ -387,17 +452,37 @@
   /* =========================================================
      视图：随记 / 日记
      ========================================================= */
+  /* 21 类情绪 → 中文标签 / 色调（顺带兼容旧数据的 good/bad） */
+  const MOOD_CN = {
+    anxious:'焦虑', tired:'疲惫', down:'低落', frustrated:'烦躁', lost:'迷茫',
+    procrastinating:'拖延', lonely:'孤独', selfDoubt:'自我怀疑', perfectionist:'完美主义',
+    hesitant:'犹豫', exhausted:'透支', giveUp:'想放弃', stressed:'压力大', guilty:'内疚',
+    numb:'麻木', happy:'轻松', proud:'小骄傲', angry:'生气', bored:'无聊', moved:'被触动',
+    flat:'平静', good:'情绪正向', bad:'有些低落'
+  };
+  const MOOD_TONE = { happy:'good', proud:'good', moved:'good', flat:'flat', good:'good', bad:'bad' };
+
   function renderNotes(){
     const st=S.load();
     const notes=st.notes.slice(0,30);
     const diaries=st.diaries.slice(0,12);
     const notesHtml=notes.length?notes.map(n=>{
-      const emoCls=n.emotion==='good'?'good':n.emotion==='bad'?'bad':'flat';
-      const emoTxt=n.emotion==='good'?'情绪正向':n.emotion==='bad'?'有些低落':'平静';
+      const mood=n.emotion||'flat';
+      const emoTxt=MOOD_CN[mood]||'平静';
+      const emoCls=MOOD_TONE[mood]||'bad';
+      // 已存过结构化重点就直接用；老数据才现场分析（readonly：不写建议记忆，避免刷新跳层）
+      const r=(n.topics||n.suggestion)?n:E.refineNote(n,{readonly:true});
+      const tags=[];
+      (r.topics||[]).slice(0,3).forEach(t=> tags.push(`<span class="rt topic">${esc(t)}</span>`));
+      (r.blockers||[]).slice(0,2).forEach(t=> tags.push(`<span class="rt blocker">${esc(t)}</span>`));
+      (r.metrics||[]).slice(0,2).forEach(m=> tags.push(`<span class="rt metric">${esc(m.raw)}</span>`));
+      (r.actions||[]).slice(0,2).forEach(t=> tags.push(`<span class="rt action">${esc(t)}</span>`));
+      if(r.when)  tags.push(`<span class="rt when">${esc(r.when)}</span>`);
+      if(r.where) tags.push(`<span class="rt where">${esc(r.where)}</span>`);
       const refine=n.refined?`<div class="refine-box">
-        ${n.points&&n.points.length?`重点：<b>${esc(n.points.join('、'))}</b><br>`:''}
-        军师建议：<b>${esc(E.refineNote(n).suggestion)}</b>
-        ${n.taskId?'<br>已关联今日任务':''}</div>`:'';
+        ${tags.length?`<div class="refine-tags">${tags.join('')}</div>`:''}
+        <div class="refine-advice">军师建议：<b>${esc(r.suggestion||'')}</b>${r.adviceLevel>1?`<span class="rt lv">进阶解法 ${r.adviceLevel}</span>`:''}</div>
+        ${r.taskId?'<div class="refine-linked">已关联今日任务</div>':''}</div>`:'';
       return `<div class="card note-card"><div class="note-text">${esc(n.text)}</div>
         <div class="note-meta"><span class="emotion ${emoCls}">${emoTxt}</span><span class="tag">${esc(n.date)}</span></div>${refine}</div>`;
     }).join(''):`<div class="empty"><div class="em">📝</div><p>还没有随记。<br>脑子里闪过的念头，先记下来，军师帮你整理成日记。</p></div>`;
@@ -437,9 +522,15 @@
   function bindNotes(){
     $('#note-add').addEventListener('click',()=>{
       const v=$('#note-input').value.trim(); if(!v){ toast('写点什么'); return; }
-      const note=S.addNote({text:v}); const r=E.refineNote(note);
-      const er=E.emotionResponse(note);
-      S.updateNote(note.id,{emotion:r.emotion,points:r.points,taskId:r.taskId,refined:true,comfort:er||''});
+      const note=S.addNote({text:v});
+      const r=E.refineNote(note);
+      // 关键：把识别出的情绪一起传给军师再要回应，否则回应会落到「平静」兜底话术
+      const er=E.emotionResponse({ id:note.id, text:v, emotion:r.emotion });
+      S.updateNote(note.id,{
+        emotion:r.emotion, points:r.points, taskId:r.taskId, refined:true, comfort:er||'',
+        suggestion:r.suggestion, topics:r.topics, blockers:r.blockers, actions:r.actions,
+        metrics:r.metrics, when:r.when, where:r.where, summary:r.summary, adviceLevel:r.adviceLevel
+      });
       if(er) S.pushLog('军师', er, 'comfort');
       $('#note-input').value=''; toast(r.suggestion||'已记录'); renderNotes();
     });
@@ -554,6 +645,7 @@
   let calWeekCursor=S.today();   // 当前「本周视图」查看的周（周一）
   let weekFocusTab='focus';      // focus | summary
   let showWeekPicker=false;      // 小周历展开状态
+  let weekFocusOpen=false;       // 「本周重点/总结」默认折叠——把垂直空间还给 7 个日格子
 
   function mondayOf(d){
     const t=new Date(d.getTime()); t.setHours(0,0,0,0);
@@ -665,7 +757,11 @@
       </div>`);
     }
 
-    // 左侧本周重点/总结：参考图没有统计块，只保留 Tab + 输入 + 保存，把空间还给格子
+    // 本周重点/总结：默认折叠成一行，展开才写——内容密集页优先把空间还给格子
+    const focusText = weekFocusTab==='focus' ? (focusData.focus||'') : (focusData.summary||'');
+    const focusPreview = focusText
+      ? esc(focusText.slice(0,20)) + (focusText.length>20?'…':'')
+      : '<span class="wf-ph">还没写，点开补一句</span>';
     const focusBody = weekFocusTab==='focus'
       ? `<div class="wf-summary">
            <textarea class="wf-area" id="wf-focus" placeholder="本周最想完成什么？">${esc(focusData.focus)}</textarea>
@@ -717,12 +813,19 @@
           </div>
         </div>
         <div class="week-main">
-          <div class="week-focus-panel">
+          <div class="week-focus-panel ${weekFocusOpen?'open':''}">
+            <button class="wf-collapse" id="wf-toggle" title="展开 / 收起">
+              <span class="wf-icon">🎯</span>
+              <span class="wf-label">${weekFocusTab==='focus'?'本周重点':'本周总结'}</span>
+              <span class="wf-preview">${focusPreview}</span>
+              <span class="wf-arrow ${weekFocusOpen?'open':''}">›</span>
+            </button>
+            ${weekFocusOpen? `
             <div class="wf-tabs">
               <button class="wf-tab ${weekFocusTab==='focus'?'on':''}" data-wtab="focus">本周重点</button>
               <button class="wf-tab ${weekFocusTab==='summary'?'on':''}" data-wtab="summary">本周总结</button>
             </div>
-            <div class="wf-body fade-in">${focusBody}</div>
+            <div class="wf-body fade-in">${focusBody}</div>`:''}
           </div>
           <div class="week-card-placeholder" aria-hidden="true"></div>
           ${dayCard(0)}${dayCard(1)}${dayCard(2)}${dayCard(3)}${dayCard(4)}${dayCard(5)}${dayCard(6)}
@@ -785,9 +888,12 @@
       calWeekCursor=new Date(r.dataset.weekjump+'T00:00:00');
       showWeekPicker=false; renderCalendar();
     }));
+    // 展开 / 收起「本周重点·总结」（默认收起，需要时才占地方）
+    const wft=view.querySelector('#wf-toggle');
+    if(wft) wft.addEventListener('click',()=>{ weekFocusOpen=!weekFocusOpen; renderCalendar(); });
     // 本周重点 / 本周总结 Tab
     view.querySelectorAll('[data-wtab]').forEach(b=>b.addEventListener('click',()=>{
-      weekFocusTab=b.dataset.wtab; renderCalendar();
+      weekFocusTab=b.dataset.wtab; weekFocusOpen=true; renderCalendar();
     }));
     // 保存本周重点
     const saveFocus=view.querySelector('#wf-save');
@@ -948,7 +1054,7 @@
         <div class="card-title">💡 军师小贴士</div>
         <p class="small muted mt8">来自商业大佬、投资家、作家、思想家与书中人物、科学家、运动员、自律明星。今日轮到 <b>${esc(cur.who)}</b>；全库共 <b>${list.length}</b> 条，每天换一位，慢慢收集属于你的习惯。</p>
       </div>
-      <div class="section-gap">${items}</div>`;
+      <div class="grid g2 g3 section-gap">${items}</div>`;
   }
 
   /* =========================================================
@@ -977,8 +1083,12 @@
     view.scrollTop=0;
     if(current==='today') updateTopbar();
   }
+  /* 内容密集型页面：收起顶栏品牌区，把垂直空间还给内容，也和其它页面形成区分 */
+  const DENSE_VIEWS = ['calendar','report','timeline','tips','power'];
+
   function navigate(v){
     render(v);
+    try{ document.body.classList.toggle('dense-view', DENSE_VIEWS.indexOf(v)>=0); }catch(e){}
     try{ window.ZQ.ui.current=v; }catch(e){}
     localStorage.setItem('zhiqi_lastview',v);
   }
