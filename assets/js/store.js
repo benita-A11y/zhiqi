@@ -113,6 +113,7 @@
       diaries:[],        // {id,date,content}
       undercover:JSON.parse(JSON.stringify(DEFAULT_UNDERCOVER)),
       log:[],            // 军师消息流 {id,date,from,text,kind}
+      adviceLog:[],      // 军师建议记忆 {id,topic,blocker,level,date} —— 用于建议去重与递进
       meta:{ createdAt:now, lastOpen:now }
     };
   }
@@ -145,8 +146,8 @@
   }
 
   /* ---------- 任务 ---------- */
-  function tasksOf(dateStr){ return (_state.tasks[dateStr]||[]); }
-  function ensureDate(dateStr){ if(!_state.tasks[dateStr]) _state.tasks[dateStr]=[]; return _state.tasks[dateStr]; }
+  function tasksOf(dateStr){ const st=load(); return (st.tasks[dateStr]||[]); }
+  function ensureDate(dateStr){ const st=load(); if(!st.tasks[dateStr]) st.tasks[dateStr]=[]; return st.tasks[dateStr]; }
   function addTask(dateStr, t){
     const arr = ensureDate(dateStr);
     const task = Object.assign({
@@ -282,13 +283,39 @@
 
   /* ---------- 随记 / 日记 ---------- */
   function addNote(n){
+    const st = load();
     const note = Object.assign({ id:uid('n'), date:fmtDate(today()), emotion:'flat', points:[], taskId:null, refined:false }, n);
-    _state.notes.unshift(note); save(); return note;
+    st.notes.unshift(note); save(); return note;
   }
   function updateNote(id,patch){ const n=_state.notes.find(x=>x.id===id); if(n){Object.assign(n,patch);save();} return n; }
   function addDiary(d){
     const dia = Object.assign({ id:uid('d'), date:fmtDate(today()), content:'' }, d);
     _state.diaries.unshift(dia); save(); return dia;
+  }
+
+  /* ---------- 军师建议记忆（去重 + 递进） ---------- */
+  // 记下「给过什么建议」，下次遇到同一主题时换个角度，不再复读
+  function pushAdvice(a){
+    const st = load();                       // 必须走 load()，否则 _state 可能尚未初始化
+    if(!st.adviceLog) st.adviceLog = [];
+    st.adviceLog.unshift(Object.assign({ date:fmtDate(today()) }, a));
+    if(st.adviceLog.length > 80) st.adviceLog.length = 80;
+    save();
+  }
+  // 最近 N 天给过的建议（默认 7 天）
+  function recentAdvice(days){
+    const st = load();
+    if(!st.adviceLog) return [];
+    const since = fmtDate(shiftDay(today(), -(days==null?7:days)));
+    return st.adviceLog.filter(a => a.date >= since);
+  }
+  // 某个主题已经给到第几层（用于递进，避免原地打转）
+  function adviceLevelOf(topic){
+    const st = load();
+    const list = st.adviceLog || [];
+    let lv = 0;
+    list.forEach(a=>{ if(a.topic===topic && (a.level||1) > lv) lv = a.level||1; });
+    return lv;
   }
 
   /* ---------- 军师消息流 ---------- */
@@ -307,6 +334,7 @@
     setTaskDate, unscheduled, pushDragLog, dragOutCount, dragInCount, getWeekFocus, setWeekFocus, setWeekSummary,
     addGoal, getGoal, updateGoal, advanceStage, deleteGoal, typeDoneRate,
     addNote, updateNote, addDiary, pushLog,
+    pushAdvice, recentAdvice, adviceLevelOf,
     KEY
   };
 })();
