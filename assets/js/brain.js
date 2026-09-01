@@ -1355,7 +1355,7 @@
     // 分析
     context, completionStats, timeSlotStats, categoryStats, habitStrength,
     procrastinationIndex, emotionTrend, goalHealth, allGoalHealth, dropOffRisk,
-    difficultySuggest, trendOf, daysSinceLastNote,
+    difficultySuggest, trendOf, daysSinceLastNote, goalTotalWeeks,
     // 决策
     priorityScore, smartOrder, decompose, nextBestAction,
     // 随记语义抽取与建议引擎
