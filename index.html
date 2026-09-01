@@ -12,7 +12,7 @@
   <meta property="og:description" content="以待办管理为核心的成长规划平台，把宏大目标拆解成每日可执行的小任务。" />
   <title>执棋 · 每日落一子</title>
   <link rel="manifest" href="assets/manifest.json" />
-  <link rel="stylesheet" href="assets/css/style.css?v=25" />
+  <link rel="stylesheet" href="assets/css/style.css?v=29" />
 </head>
 <body>
   <!-- 应用根 -->
@@ -39,11 +39,13 @@
     <!-- 主内容区 -->
     <main id="view" class="view"></main>
 
-    <!-- 底部导航（移动端）：仅常驻核心 + 更多入口，默认精简 -->
+    <!-- 底部导航（移动端）：按使用频率与流程排布 —— 核心循环(计划→执行→目标→复盘)常驻 + 更多入口 -->
     <nav class="tabbar" id="tabbar">
-      <button class="tab active" data-view="today"><span>♟️</span><em>今日棋局</em></button>
-      <button class="tab" data-view="manual"><span>📋</span><em>棋谱</em></button>
-      <button class="tab" data-view="more"><span>⋯</span><em>更多</em></button>
+      <button class="tab active" data-view="today"><span class="t-in"><span class="t-ic">♟️</span><em>今日</em></span></button>
+      <button class="tab" data-view="calendar"><span class="t-in"><span class="t-ic">📅</span><em>棋历</em></span></button>
+      <button class="tab" data-view="manual"><span class="t-in"><span class="t-ic">📋</span><em>谋局</em></span></button>
+      <button class="tab" data-view="notes"><span class="t-in"><span class="t-ic">📝</span><em>随记</em></span></button>
+      <button class="tab" data-view="more"><span class="t-in"><span class="t-ic">⋯</span><em>更多</em></span></button>
     </nav>
   </div>
 
@@ -80,23 +82,7 @@
         <h2>☰ 更多功能</h2>
         <button class="icon-btn" id="close-more">✕</button>
       </div>
-      <div class="more-body">
-        <div class="more-sec">
-          <div class="more-sec-title">常用</div>
-          <button class="more-item" data-view="calendar"><span class="mi">📅</span><span class="ml">棋历</span><span class="md">规划与拖拽排程</span></button>
-          <button class="more-item" data-view="notes"><span class="mi">📝</span><span class="ml">随记</span><span class="md">念头与日记</span></button>
-          <button class="more-item" data-view="power"><span class="mi">📊</span><span class="ml">棋力</span><span class="md">完成率与进度</span></button>
-          <button class="more-item" data-view="report"><span class="mi">📈</span><span class="ml">周报</span><span class="md">每周深度复盘</span></button>
-        </div>
-        <div class="more-sec">
-          <div class="more-sec-title muted">工具箱</div>
-          <button class="more-item" data-view="undercover"><span class="mi">🔐</span><span class="ml">卧底档案</span><span class="md">代号与情报</span></button>
-          <button class="more-item" data-view="timeline"><span class="mi">🗺️</span><span class="ml">十年棋局</span><span class="md">成长长图</span></button>
-          <button class="more-item" data-view="tips"><span class="mi">💡</span><span class="ml">小贴士</span><span class="md">大人物习惯</span></button>
-          <button class="more-item" id="open-backup"><span class="mi">💾</span><span class="ml">数据备份</span><span class="md">导出 / 导入 / 重置</span></button>
-          <button class="more-item" id="open-about"><span class="mi">ℹ️</span><span class="ml">关于执棋</span><span class="md">版本与说明</span></button>
-        </div>
-      </div>
+      <div class="more-body" id="more-body"><!-- 由 app.js 按 NAV 配置统一生成，避免定义漂移 --></div>
     </div>
   </div>
 
@@ -137,11 +123,12 @@
   <div class="toast" id="toast" hidden></div>
 
   <!-- 脚本（普通 script，保证 file:// 直接打开也能跑；?v=N 让更新必走网络） -->
-  <script src="assets/js/store.js?v=25"></script>
-  <script src="assets/js/brain.js?v=25"></script>
-  <script src="assets/js/engine.js?v=25"></script>
-  <script src="assets/js/undercover.js?v=25"></script>
-  <script src="assets/js/ui.js?v=25"></script>
-  <script src="assets/js/app.js?v=25"></script>
+  <script src="assets/js/store.js?v=29"></script>
+  <script src="assets/js/brain.js?v=29"></script>
+  <script src="assets/js/oracle.js?v=29"></script>
+  <script src="assets/js/engine.js?v=29"></script>
+  <script src="assets/js/undercover.js?v=29"></script>
+  <script src="assets/js/ui.js?v=29"></script>
+  <script src="assets/js/app.js?v=29"></script>
 </body>
 </html>
