@@ -20,33 +20,45 @@
   const $ = s=>document.querySelector(s);
 
   /* ---------- 导航分层配置（权重分级的唯一真相源） ---------- */
-  // 一级：每日核心，常驻主导航
+  // 排序即体现使用频率与「计划 → 执行 → 目标 → 复盘」的真实流程。
+  // 一级：每日核心循环，常驻底部栏 / 桌面侧边栏
   const NAV_PRIMARY = [
-    {view:'today',  icon:'♟️', label:'今日棋局'},
-    {view:'manual', icon:'📋', label:'棋谱'},
+    {view:'today',   icon:'♟️', label:'今日'},
+    {view:'calendar',icon:'📅', label:'棋历'},
+    {view:'manual',  icon:'📋', label:'谋局'},
+    {view:'notes',   icon:'📝', label:'随记'},
   ];
-  // 二级：常用，收纳于「更多」抽屉的常用区
+  // 二级：常用，收纳于「更多」抽屉的「常用」区
   const NAV_SECONDARY = [
-    {view:'calendar', icon:'📅', label:'棋历'},
-    {view:'notes',    icon:'📝', label:'随记'},
-    {view:'power',    icon:'📊', label:'棋力'},
-    {view:'report',   icon:'📈', label:'周报'},
+    {view:'power',  icon:'📊', label:'战绩',   desc:'完成率与进度'},
+    {view:'report', icon:'📈', label:'周报',   desc:'每周深度复盘'},
   ];
-  // 三级：低频/附属，收敛于「工具箱」
+  // 三级：低频 / 附属，收敛于「工具箱」
   const NAV_TERTIARY = [
-    {view:'undercover', icon:'🔐', label:'卧底档案'},
-    {view:'timeline',   icon:'🗺️', label:'十年棋局'},
-    {view:'tips',       icon:'💡', label:'小贴士'},
-    {action:'backup',   icon:'💾', label:'数据备份'},
-    {action:'about',    icon:'ℹ️', label:'关于执棋'},
+    {view:'undercover', icon:'🔐', label:'卧底档案', desc:'代号与情报'},
+    {view:'timeline',   icon:'🗺️', label:'十年棋局', desc:'成长长图'},
+    {view:'tips',       icon:'💡', label:'锦囊',   desc:'大人物习惯'},
+    {action:'backup',   icon:'💾', label:'数据备份', desc:'导出 / 导入 / 重置'},
+    {action:'about',    icon:'ℹ️', label:'关于执棋', desc:'版本与说明'},
   ];
   const ALL_VIEWS = [...NAV_PRIMARY, ...NAV_SECONDARY, ...NAV_TERTIARY].map(x=>x.view).filter(Boolean);
 
+  // 图标+文字包进 .t-in，选中态才能只把「图标+文字」罩在柔和药丸底色里（而非整条拉通）
   function navBtnHTML(item, cls){
-    const icon = item.icon?`<span>${item.icon}</span>`:'';
-    if(item.action) return `<button class="${cls}" data-action="${item.action}">${icon}${item.label}</button>`;
-    return `<button class="${cls}" data-view="${item.view}">${icon}${item.label}</button>`;
+    const icon = item.icon?`<span class="t-ic">${item.icon}</span>`:'';
+    const inner = `<span class="t-in">${icon}<em>${item.label}</em></span>`;
+    if(item.action) return `<button class="${cls}" data-action="${item.action}">${inner}</button>`;
+    return `<button class="${cls}" data-view="${item.view}">${inner}</button>`;
   }
+  // 「更多」抽屉项带描述，比纯按钮信息密度更合适
+  function moreItemHTML(it){
+    const icon = `<span class="mi">${it.icon}</span>`;
+    const label = `<span class="ml">${it.label}</span>`;
+    const desc = it.desc?`<span class="md">${it.desc}</span>`:'';
+    if(it.action) return `<button class="more-item" data-action="${it.action}">${icon}${label}${desc}</button>`;
+    return `<button class="more-item" data-view="${it.view}">${icon}${label}${desc}</button>`;
+  }
+  function escHTML(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
   /* ---------- 侧边栏（桌面端）：一级常驻 + 更多折叠组 ---------- */
   function buildSidebar(){
@@ -87,24 +99,45 @@
     });
   }
 
+  /* ---------- 底部标签栏：由 NAV_PRIMARY 统一生成（单一真相源） ---------- */
+  function buildTabbar(){
+    const bar=$('#tabbar'); if(!bar) return;
+    const items=NAV_PRIMARY.slice(0,4).map(x=>navBtnHTML(x,'tab'));
+    items.push(`<button class="tab" data-view="more"><span class="t-in"><span class="t-ic">⋯</span><em>更多</em></span></button>`);
+    bar.innerHTML=items.join('');
+  }
+
   /* ---------- 底部「更多」抽屉（移动端） ---------- */
-  function openMore(){ $('#more-sheet').hidden=false; }
+  function openMore(){ buildMore(); $('#more-sheet').hidden=false; }
   function closeMore(){ $('#more-sheet').hidden=true; }
+  // 更多抽屉内容按配置生成一次，避免与底部栏 / 侧边栏定义漂移
+  function buildMore(){
+    const body=$('#more-body'); if(!body || body.dataset.built) return;
+    const sec=NAV_SECONDARY.map(x=>moreItemHTML(x)).join('');
+    const ter=NAV_TERTIARY.map(x=>moreItemHTML(x)).join('');
+    body.innerHTML=`
+      <div class="more-sec">
+        <div class="more-sec-title">常用</div>${sec}
+      </div>
+      <div class="more-sec">
+        <div class="more-sec-title muted">工具箱</div>${ter}
+      </div>`;
+    body.dataset.built='1';
+    body.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{ UI.navigate(b.dataset.view); closeMore(); }));
+    body.querySelectorAll('[data-action]').forEach(b=>b.addEventListener('click',()=>{
+      closeMore();
+      if(b.dataset.action==='backup') openBackup();
+      else if(b.dataset.action==='about') openAbout();
+    }));
+  }
   function bindMore(){
-    // 底部标签：一级直接跳转，更多打开抽屉
-    document.querySelectorAll('.tab').forEach(t=>{
-      if(t.dataset.view==='more') return; // 单独处理
-      t.addEventListener('click',()=>UI.navigate(t.dataset.view));
+    buildTabbar();
+    document.querySelectorAll('#tabbar .tab').forEach(t=>{
+      if(t.dataset.view==='more') t.addEventListener('click',openMore);
+      else t.addEventListener('click',()=>UI.navigate(t.dataset.view));
     });
-    const tab=document.querySelector('.tab[data-view="more"]');
-    if(tab) tab.addEventListener('click',openMore);
     $('#close-more').addEventListener('click',closeMore);
     $('#more-sheet').addEventListener('click',e=>{ if(e.target.id==='more-sheet') closeMore(); });
-    $('#more-sheet').querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{
-      UI.navigate(b.dataset.view); closeMore();
-    }));
-    $('#open-backup').addEventListener('click',()=>{ closeMore(); openBackup(); });
-    $('#open-about').addEventListener('click',()=>{ closeMore(); openAbout(); });
   }
 
   /* ---------- 数据备份（三级 · 原混在棋力） ---------- */
@@ -128,7 +161,9 @@
       r.readAsText(f);
     });
     $('#reset-btn').addEventListener('click',()=>{
-      if(confirm('确定要清空所有棋局、重新开始吗？建议先导出备份。')){ S.reset(); UI.toast('已重置'); UI.navigate('today'); $('#backup-sheet').hidden=true; }
+      UI.confirm('重置棋局','确定要清空所有棋局、重新开始吗？\n建议先导出备份，换设备时再导入恢复。',()=>{
+        S.reset(); UI.toast('已重置'); UI.navigate('today'); $('#backup-sheet').hidden=true;
+      }, true);
     });
   }
 
@@ -137,6 +172,13 @@
     $('#about-sheet').hidden=false;
     const v=(window.ZQ && window.ZQ.__VER) || '';
     $('#about-ver').textContent = v ? ('当前版本：'+v) : '离线版 · 数据本机保存';
+  }
+  let _aboutBound=false;
+  function bindAboutOnce(){
+    if(_aboutBound) return; _aboutBound=true;
+    // 关闭：X 按钮 + 点遮罩空白处（之前漏绑，导致点叉号无反应）
+    $('#close-about').addEventListener('click',()=>{ $('#about-sheet').hidden=true; });
+    $('#about-sheet').addEventListener('click',e=>{ if(e.target.id==='about-sheet') $('#about-sheet').hidden=true; });
   }
 
   /* ---------- 军师浮层（保留大脑入口，去除重复的「推荐新棋」） ---------- */
@@ -195,6 +237,7 @@
   }
 
   function init(){
+    window.ZQ.__VER='v26';
     S.load();
     U.init();
     U.checkDateTransition();
@@ -205,6 +248,10 @@
     buildSidebar();
     bindStrategist();
     bindMore();
+    bindAboutOnce();
+    // 顶部「连续落子」徽章本就是信息入口：点它直接进棋力看数据
+    const streakChip=$('#streak-chip');
+    if(streakChip) streakChip.addEventListener('click',()=>UI.navigate('power'));
 
     const last=localStorage.getItem('zhiqi_lastview')||'today';
     UI.updateTopbar();
@@ -213,7 +260,7 @@
     // PWA：仅在 http/https 下注册，file:// 直接打开同样可用
     if('serviceWorker' in navigator && location.protocol.indexOf('http')===0){
       // 注册 URL 带版本号：每次部署版本号变化，浏览器无法命中旧缓存，实现「打开即更新」
-      navigator.serviceWorker.register('sw.js?v=25').catch(()=>{});
+      navigator.serviceWorker.register('sw.js?v=29').catch(()=>{});
       // 新版本 Service Worker 接管后，自动刷新一次页面，让用户立即看到新内容
       // 若首屏仍在加载，等 load 完成再刷新，避免「先白屏硬刷」的卡顿感
       let _reloaded=false;
