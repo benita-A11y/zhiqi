@@ -1,9 +1,10 @@
 /* 执棋 · Service Worker —— 让 App 可安装、可离线，且「打开即更新」 */
-const CACHE = 'zhiqi-v25';
+const CACHE = 'zhiqi-v29';
 const CORE = [
   './', './index.html',
   './assets/css/style.css',
-  './assets/js/store.js', './assets/js/brain.js', './assets/js/engine.js',
+  './assets/js/store.js', './assets/js/brain.js', './assets/js/oracle.js',
+  './assets/js/engine.js',
   './assets/js/undercover.js', './assets/js/ui.js', './assets/js/app.js',
   './assets/manifest.json', './assets/icon.svg',
   './assets/img/strategist-avatar.png'
