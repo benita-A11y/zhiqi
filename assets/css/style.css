@@ -12,6 +12,9 @@
   --peach:#F2D2B6;    --peach-d:#C9966A;
   --yellow:#F4E6A8;
 
+  /* 导航选中态：统一的柔和马克龙底色（紫→蓝渐变），底部 tab 与桌面侧边栏共用 */
+  --active-bg:linear-gradient(135deg, rgba(197,180,227,.32), rgba(180,212,227,.26));
+
   --bg:#FAF8F5;
   --card:#FFFFFF;
   --ink:#2B2730;
@@ -126,13 +129,16 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
   padding-bottom:env(safe-area-inset-bottom);
 }
 .tab{
-  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
-  color:var(--ink-3);font-size:10px;transition:color .15s;
+  flex:1;display:flex;align-items:center;justify-content:center;
+  color:var(--ink-3);transition:color .15s;
 }
-.tab span{font-size:19px;filter:grayscale(.4);transition:transform .15s,filter .15s;}
-.tab em{font-style:normal;font-weight:600;}
+/* 图标+文字包成居中药丸，选中态只罩这块区域 —— 参考 Notion / Apple 系 App 的选中高亮 */
+.tab .t-in{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 12px;border-radius:14px;transition:background .2s,box-shadow .2s;}
+.tab .t-ic{font-size:18px;filter:grayscale(.45);transition:transform .18s,filter .18s;}
+.tab em{font-style:normal;font-weight:650;font-size:11px;}
 .tab.active{color:var(--purple-d);}
-.tab.active span{filter:none;transform:translateY(-1px) scale(1.05);}
+.tab.active .t-in{background:var(--active-bg);box-shadow:var(--shadow-sm);}
+.tab.active .t-ic{filter:none;transform:translateY(-1px) scale(1.06);}
 
 /* 侧边栏仅桌面端显示，移动/平板隐藏，避免抢占高度 */
 .sidebar{display:none;}
@@ -159,7 +165,7 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
     color:var(--ink-2);font-weight:600;font-size:14.5px;text-align:left;transition:background .15s,color .15s;
   }
   .side-item span{font-size:19px;}
-  .side-item.active{background:linear-gradient(135deg,rgba(197,180,227,.22),rgba(180,212,227,.22));color:var(--purple-d);}
+  .side-item.active{background:var(--active-bg);color:var(--purple-d);}
   .side-foot{font-size:11px;color:var(--ink-3);padding:8px;text-align:center;line-height:1.6;}
   .view{margin-left:max(var(--sidebar-w), calc(50vw - 600px));margin-right:auto;padding-top:84px;max-width:1200px;height:100vh;min-height:0;}
   .view-inner{max-width:960px;margin:0 auto;}
@@ -186,6 +192,7 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 .btn.primary{background:linear-gradient(135deg,var(--purple),var(--purple-d));color:#fff;box-shadow:var(--shadow-sm);}
 .btn.ghost{background:var(--bg);color:var(--ink-2);border:1px solid var(--line-2);}
 .btn.ghost.danger{color:#b56b63;border-color:rgba(181,107,99,.32);}
+.btn.danger{background:linear-gradient(135deg,var(--pink),var(--pink-d));color:#fff;box-shadow:var(--shadow-sm);}
 .btn.mint{background:linear-gradient(135deg,var(--mint),var(--mint-d));color:#fff;}
 .btn.pink{background:linear-gradient(135deg,var(--pink),var(--pink-d));color:#fff;}
 .btn.block{width:100%;}
@@ -227,6 +234,13 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 }
 .group-label .bar{width:4px;height:15px;border-radius:3px;background:var(--purple);}
 .group-label .cnt{margin-left:auto;color:var(--ink-3);font-weight:600;font-size:12px;}
+
+/* 今日棋局：完成度一眼可见（今日进度 = 已完成 / 总数） */
+.today-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:14px 2px 4px;}
+.today-prog{display:flex;align-items:center;gap:9px;flex:1;max-width:210px;}
+.today-prog-bar{flex:1;height:6px;border-radius:999px;background:var(--line);overflow:hidden;}
+.today-prog-bar > i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--mint),var(--mint-d));transition:width .45s;}
+.today-prog-txt{font-size:12px;color:var(--ink-3);font-weight:800;flex:none;}
 
 /* 任务项 */
 .task{
@@ -512,7 +526,7 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
   .day-col,.inbox-col{flex:none;width:auto;}
 }
 @media(max-width:480px){
-  .tab span{font-size:18px;}
+  .tab .t-ic{font-size:17px;}
   .tab em{font-size:10px;}
 }
 
@@ -610,7 +624,13 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 .wc-add{flex:none;width:20px;height:20px;border-radius:50%;border:none;background:var(--bg);color:var(--purple-d);font-size:15px;line-height:1;display:grid;place-items:center;cursor:pointer;transition:background .15s;}
 .wc-add:hover{background:var(--purple);color:#fff;}
 
-.wc-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;}
+.wc-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;position:relative;scrollbar-width:none;}
+.wc-body::-webkit-scrollbar{width:0;height:0;}
+/* 日卡内容超出时的底部渐隐：暗示「往下还有任务」而不必加滚动条 */
+.week-card .wc-body::after{
+  content:"";position:absolute;left:0;right:0;bottom:0;height:16px;pointer-events:none;
+  background:linear-gradient(transparent,var(--card));border-radius:0 0 8px 8px;
+}
 .wc-zone{min-height:40px;border-radius:8px;}
 .wc-rate{height:3px;background:var(--line);border-radius:999px;margin-top:6px;overflow:hidden;}
 .wc-rate>div{height:100%;border-radius:999px;transition:width .3s;}
@@ -765,7 +785,7 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 }
 .side-sub span{font-size:18px;}
 .side-sub:hover{background:var(--bg);}
-.side-sub.active{color:var(--purple-d);background:rgba(197,180,227,.16);}
+.side-sub.active{color:var(--purple-d);background:rgba(197,180,227,.18);}
 
 /* 「更多」抽屉（移动端底部浮层） */
 .more-sheet{max-width:520px;}
@@ -789,6 +809,11 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
   margin-top:16px;font-size:12px;color:var(--ink-3);background:var(--bg);
   border-radius:10px;padding:10px 12px;text-align:center;
 }
+/* 站内确认 / 输入弹窗：保留文案里的换行 */
+.dlg-msg{white-space:pre-line;line-height:1.7;font-size:13.5px;color:var(--ink-2);}
+/* 首页军师卡：点开即唤起军师会客厅 */
+.clickable-strategist{cursor:pointer;transition:box-shadow .15s,transform .1s;}
+.clickable-strategist:active{transform:scale(.99);}
 .hint-card{background:rgba(197,180,227,.10);border:1px solid rgba(197,180,227,.32);}
 .hint-card .card-title{color:var(--purple-d);}
 
@@ -888,11 +913,20 @@ input,textarea,select{font-family:inherit;font-size:15px;color:var(--ink);}
 .refine-advice{line-height:1.6;}
 .refine-linked{margin-top:6px;font-size:11.5px;color:var(--ink-3);}
 
-/* 内容密集页：收起顶栏品牌区，把垂直空间还给内容，同时与其它页面形成区分 */
-body.dense-view .topbar{padding:7px 14px;gap:8px;}
-body.dense-view .brand-text{display:none;}
-body.dense-view .brand-mark{width:30px;height:30px;font-size:16px;border-radius:9px;}
-body.dense-view .view{padding-top:10px;}
+/* 内容密集页（棋历/周报/棋力/十年/小贴士）：直接收掉「执棋」品牌行，
+   把整条顶栏压成极简模式 —— 既把纵向空间还给内容多的页面，也和首页在视觉上明显区分 */
+body.dense-view .topbar{
+  padding:6px 14px;min-height:46px;
+  border-bottom-color:transparent;
+  background:rgba(250,248,245,.72);
+}
+body.dense-view .brand{display:none;}
+body.dense-view .view{padding-top:6px;}
+/* 桌面端：顶栏固定，密集页同样收薄并回收缩进，让 8 宫格等获得更大高度 */
+@media(min-width:1024px){
+  body.dense-view .topbar{height:48px;padding:8px 18px;}
+  body.dense-view .view{padding-top:58px;}
+}
 
 /* 触屏设备没有 hover —— 操作按钮必须常驻，否则永远点不到编辑/删除 */
 @media(hover:none){
@@ -954,3 +988,148 @@ body.dense-view .view{padding-top:10px;}
   border-radius:11px;font-size:12.5px;font-weight:700;color:#2f6b52;
 }
 .fold-done-btn:active{transform:scale(.99);background:rgba(180,227,212,.28);}
+
+/* ============================================================
+   算法中台相关样式（v28）
+   此刻状态 / 顺路度 / 预测卡 / 下周布局 / 军师会客厅
+   ============================================================ */
+
+/* ---------- 此刻状态：精力 / 负荷 / 今日预测 ---------- */
+.strat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:10px;}
+.strat-cell{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px 11px;}
+.sc-lab{font-size:11px;font-weight:700;color:var(--ink-3);letter-spacing:.2px;}
+.sc-num{font-size:21px;font-weight:800;color:var(--ink);line-height:1.15;margin:3px 0 7px;}
+.sc-num i{font-size:11px;font-weight:600;color:var(--ink-3);font-style:normal;}
+.strat-bar{height:6px;border-radius:3px;background:rgba(163,157,174,.18);overflow:hidden;}
+.strat-bar i{display:block;height:100%;border-radius:3px;transition:width .45s ease;}
+.sc-sub{font-size:11px;color:var(--ink-3);margin-top:6px;line-height:1.35;}
+.strat-next{
+  margin-top:11px;padding:9px 11px;border-radius:11px;
+  background:rgba(197,180,227,.12);border:1px solid rgba(197,180,227,.32);
+  font-size:12.5px;line-height:1.55;color:var(--ink-2);
+}
+/* 状态色：精力高→薄荷、中→淡紫、低→蜜桃、见底→粉；
+   负荷超载→粉、偏重→蜜桃、刚好→薄荷、偏轻→雾蓝 */
+.lv-high,.lv-fit{background:var(--mint);}
+.lv-mid,.lv-light{background:var(--blue);}
+.lv-low,.lv-heavy{background:var(--peach);}
+.lv-depleted,.lv-overload{background:var(--pink);}
+
+/* ---------- 拆解步骤的分钟数 ---------- */
+.ts-min{
+  flex:none;margin-left:auto;font-size:11px;font-weight:800;
+  color:var(--purple-d);background:rgba(197,180,227,.16);
+  padding:1px 6px;border-radius:6px;
+}
+
+/* ---------- 顺路：推荐理由 / 顺路度 / 打包建议 ---------- */
+.ro-score{
+  display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;
+  font-size:10.5px;font-weight:800;color:#2f6b52;
+  background:rgba(180,227,212,.3);border:1px solid rgba(180,227,212,.7);
+}
+.ro-reason{display:block;font-size:11px;color:var(--ink-3);margin-top:4px;line-height:1.45;}
+.route-chain{
+  margin-top:10px;padding:9px 11px;border-radius:11px;font-size:12px;
+  color:#3f7a63;background:rgba(180,227,212,.16);border:1px dashed rgba(180,227,212,.8);
+}
+
+/* ---------- 周报：军师预测 ---------- */
+.fc-factors{display:flex;flex-wrap:wrap;gap:6px;}
+.fc-f{
+  font-size:11px;color:var(--ink-2);padding:3px 9px;border-radius:999px;
+  background:var(--bg);border:1px solid var(--line-2);
+}
+.fc-goal{
+  padding:10px 12px;background:var(--bg);border:1px solid var(--line);
+  border-radius:12px;margin-bottom:8px;
+}
+.fg-head{display:flex;align-items:center;gap:8px;font-size:13.5px;}
+.fg-v{
+  margin-left:auto;font-size:11px;font-weight:800;padding:2px 9px;border-radius:999px;
+}
+.fg-v.safe  {color:#2f6b52;background:rgba(180,227,212,.34);border:1px solid rgba(180,227,212,.7);}
+.fg-v.tight {color:#8a5a3c;background:rgba(242,210,182,.32);border:1px solid rgba(242,210,182,.75);}
+.fg-v.risk  {color:#a4586c;background:rgba(227,180,197,.32);border:1px solid rgba(227,180,197,.75);}
+.fg-v.done  {color:#5E92AE;background:rgba(180,212,227,.32);border:1px solid rgba(180,212,227,.7);}
+.fg-line{font-size:11.5px;color:var(--ink-3);margin-top:4px;}
+.fg-tip{font-size:12px;color:var(--ink-2);line-height:1.55;margin-top:6px;}
+
+/* ---------- 下周布局：目标配额 ---------- */
+.nw-alloc{padding:9px 0;border-bottom:1px dashed var(--line-2);}
+.nw-alloc:last-child{border-bottom:none;}
+.nwa-row{display:flex;align-items:center;gap:9px;}
+.nwa-name{font-size:13px;font-weight:700;flex:none;width:5.5em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.nwa-bar{flex:1;height:7px;border-radius:4px;background:rgba(163,157,174,.18);overflow:hidden;}
+.nwa-bar i{display:block;height:100%;border-radius:4px;background:var(--purple);}
+.nwa-pct{flex:none;font-size:11.5px;font-weight:800;color:var(--purple-d);width:3em;text-align:right;}
+.nwa-why{font-size:11.5px;color:var(--ink-3);line-height:1.5;margin-top:5px;}
+
+/* ---------- 军师会客厅：提问 ---------- */
+.ask-box{display:flex;gap:8px;}
+.ask-box input{
+  flex:1;min-width:0;padding:10px 12px;font-size:14px;font-family:var(--font);
+  background:var(--bg);border:1px solid var(--line-2);border-radius:11px;color:var(--ink);
+}
+.ask-box input:focus{outline:none;border-color:var(--purple);background:#fff;}
+.ask-chips{display:flex;flex-wrap:wrap;gap:6px;}
+.ask-chip{
+  padding:6px 11px;font-size:11.5px;font-weight:600;font-family:var(--font);
+  color:var(--purple-d);background:rgba(197,180,227,.13);
+  border:1px solid rgba(197,180,227,.4);border-radius:999px;
+}
+.ask-chip:active{transform:scale(.96);background:rgba(197,180,227,.26);}
+.ask-answer{
+  padding:11px 12px;border-radius:12px;
+  background:var(--bg);border:1px solid var(--line-2);
+}
+.aa-q{font-size:11.5px;color:var(--ink-3);margin-bottom:6px;}
+.aa-a{font-size:13px;line-height:1.65;color:var(--ink);}
+
+/* ---------- 随记：领域知识（为什么这么做） ---------- */
+.refine-domain{
+  margin-top:6px;font-size:11.5px;line-height:1.55;color:var(--ink-2);
+  padding:7px 10px;border-radius:9px;
+  background:rgba(244,230,168,.2);border:1px solid rgba(244,230,168,.55);
+}
+
+/* ============================================================
+   v29 设计精修：导航锚点 / 落子动效 / 温柔问候 / 军师横滑廊
+   ============================================================ */
+
+/* 底部导航激活态：柔和马克龙药丸底色（见 .tab .t-in / --active-bg），已取代旧版小圆点锚定 */
+
+/* 落子动效：勾选时棋子轻轻一弹，整条任务柔和淡出——把「完成」变成一种小确幸 */
+@keyframes checkPop{0%{transform:scale(.6);}55%{transform:scale(1.18);}100%{transform:scale(1);}}
+.check.on::after{animation:checkPop .28s cubic-bezier(.2,.9,.3,1.3);}
+.task.done{transition:opacity .35s,transform .35s;animation:doneFade .4s ease;}
+@keyframes doneFade{from{transform:translateY(-2px);}to{transform:translateY(0);}}
+/* 完成的任务条在视觉上退后，把视线让给还没做的事 */
+.task.done .task-title{color:var(--ink-3);}
+
+/* 今日 · 随时段变化的温柔问候（无红点、无 badge，只是轻声铺垫） */
+.today-greet{
+  display:flex;align-items:center;gap:8px;
+  font-size:14px;font-weight:650;color:var(--ink-2);
+  padding:2px 2px 6px;letter-spacing:.2px;
+}
+.today-greet .ge{font-size:18px;filter:drop-shadow(0 1px 2px rgba(140,111,201,.18));}
+
+/* 军师横滑廊：预判 / 今日气象 / 今日锦囊 三张小笺横向滑动，首屏更整洁；
+   桌面端并排成一行。像随手翻军师的几张便笺。 */
+.strat-rail{
+  display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;
+  -webkit-overflow-scrolling:touch;padding-bottom:4px;margin:0 -2px;
+}
+.strat-rail::-webkit-scrollbar{height:0;}
+.strat-rail > .card{
+  flex:0 0 82%;scroll-snap-align:start;margin-bottom:0;
+}
+@media(min-width:768px){
+  .strat-rail{display:grid;grid-template-columns:repeat(3,1fr);overflow:visible;margin:0;}
+  .strat-rail > .card{flex:none;scroll-snap-align:none;}
+}
+/* 小屏横滑时给最后一张一点右留白，暗示还能滑 */
+@media(max-width:767px){
+  .strat-rail::after{content:"";flex:0 0 6px;}
+}
