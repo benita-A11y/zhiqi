@@ -5,6 +5,7 @@
   const S = window.ZQ.store;
   const E = window.ZQ.engine;
   const U = window.ZQ.undercover;
+  const O = window.ZQ.oracle;
 
   const $ = sel => document.querySelector(sel);
   const view = $('#view');
@@ -37,6 +38,66 @@
   function closeModal(){ $('#modal-sheet').hidden=true; }
   function closeStrategist(){ $('#strategist-sheet').hidden=true; }
 
+  /* ---------- 站内确认 / 输入弹窗（替代原生 confirm/prompt）
+     原因：预览面板 / PWA 的 webview 常会拦截原生 confirm()/prompt()，导致「点了没反应」。
+     站内弹窗风格与主题统一，且在任何环境都稳定可用。 ---------- */
+  function dialog(opts){
+    const mask=document.createElement('div'); mask.className='sheet-mask';
+    const actions=(opts.actions||[]).map((a,i)=>
+      `<button class="btn ${a.cls||'ghost'}" data-dlg="${i}">${esc(a.label)}</button>`).join('');
+    mask.innerHTML=`<div class="sheet modal">
+      <div class="sheet-head"><h2>${esc(opts.title||'提示')}</h2></div>
+      <div class="sheet-body">${opts.bodyHTML||''}
+        <div class="row wrap mt16" style="justify-content:flex-end">${actions}</div>
+      </div></div>`;
+    document.body.appendChild(mask);
+    const close=()=>mask.remove();
+    mask.addEventListener('click',e=>{ if(e.target===mask) close(); });
+    mask.querySelectorAll('[data-dlg]').forEach(b=>b.addEventListener('click',()=>{
+      const a=opts.actions[+b.dataset.dlg];
+      const inp=mask.querySelector('#dlg-input');
+      const val=inp?inp.value:null;
+      close();
+      if(a&&a.onClick) a.onClick(val);
+    }));
+    setTimeout(()=>{ const inp=mask.querySelector('#dlg-input'); if(inp) inp.focus(); },60);
+    return mask;
+  }
+  // 确认框：danger=true 时确认键用红色实心，强调破坏性
+  function confirm(title,msg,onYes,danger){
+    dialog({
+      title,
+      bodyHTML:`<p class="small dlg-msg">${esc(msg)}</p>`,
+      actions:[
+        {label:'取消', cls:'ghost', onClick:()=>{}},
+        {label:'确认', cls: danger?'danger':'primary', onClick:()=>{ if(onYes) onYes(); }}
+      ]
+    });
+  }
+  // 输入框：onOk 收到已 trim 的文本
+  function prompt(title,msg,onOk,opts){
+    opts=opts||{};
+    dialog({
+      title,
+      bodyHTML:`${msg?`<p class="small dlg-msg" style="margin-bottom:10px">${esc(msg)}</p>`:''}
+        <div class="field" style="margin:0"><input id="dlg-input" value="${esc(opts.value||'')}" placeholder="${esc(opts.placeholder||'')}"></div>`,
+      actions:[
+        {label:'取消', cls:'ghost', onClick:()=>{}},
+        {label:'确定', cls:'primary', onClick:(val)=>{ if(onOk) onOk((val||'').trim()); }}
+      ]
+    });
+  }
+
+  /* 随时段变化的温柔问候——无红点、无 badge，只是轻轻铺垫今天的氛围 */
+  function timeGreeting(){
+    const h = new Date().getHours();
+    if(h>=5  && h<11) return {icon:'🌤', text:'晨光正好，今天慢慢落子'};
+    if(h>=11 && h<14) return {icon:'🌞', text:'日头正暖，先吃口饭再战'};
+    if(h>=14 && h<18) return {icon:'🍃', text:'午后悠长，一件件来'};
+    if(h>=18 && h<21) return {icon:'🌆', text:'暮色起了，收个尾就好好歇着'};
+    return {icon:'🌙', text:'夜深了，轻一点，慢慢来'};
+  }
+
   /* =========================================================
      视图：今日棋局
      ========================================================= */
@@ -47,35 +108,72 @@
     const cmd=E.strategistCommand(todayStr);
     const tasks=S.tasksOf(todayStr).slice().sort((a,b)=>a.order-b.order);
     const allDone = tasks.length>0 && tasks.every(t=>t.done);
+    const doneN = tasks.filter(t=>t.done).length;
+    const donePct = tasks.length? Math.round(doneN/tasks.length*100):0;
 
     // 预判：主动比用户先想一步
     const preds=E.predict();
     const predictHTML = preds.length? `
-      <div class="card predict-card fade-in">
+      <div class="card predict-card fade-in" title="点此打开军师会客厅" data-open-strategist>
         <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> 军师预判</div>
         <ul class="predict-list">
           ${preds.map(p=>`<li>${esc(p.text)}</li>`).join('')}
         </ul>
       </div>` : '';
 
+    // 此刻状态：把「现在到底什么情况」摊开——精力 / 负荷 / 今日预测，都是实时算出来的
+    const strat = cmd.energy, loadD = cmd.load, fcD = cmd.forecast;
+    const stratHTML = (strat||loadD||fcD)? `
+      <div class="card strat-card fade-in">
+        <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> 今日气象</div>
+        <div class="strat-grid">
+          ${strat?`<div class="strat-cell">
+            <div class="sc-lab">精力</div>
+            <div class="sc-num">${strat.energy}<i>/100</i></div>
+            <div class="strat-bar"><i class="lv-${strat.level}" style="width:${strat.energy}%"></i></div>
+            <div class="sc-sub">${esc(strat.slotCN)} · ${esc(strat.levelCN)}</div>
+          </div>`:''}
+          ${loadD?`<div class="strat-cell">
+            <div class="sc-lab">今日负荷</div>
+            <div class="sc-num">${loadD.minutes}<i>′</i></div>
+            <div class="strat-bar"><i class="lv-${loadD.level}" style="width:${Math.min(100,Math.round(loadD.ratio*100))}%"></i></div>
+            <div class="sc-sub">${esc(loadD.levelCN)} · 可用 ${loadD.capacity}′</div>
+          </div>`:''}
+          ${fcD?`<div class="strat-cell">
+            <div class="sc-lab">今日预测</div>
+            <div class="sc-num">${Math.round(fcD.rate*100)}<i>%</i></div>
+            <div class="strat-bar"><i class="lv-${fcD.level==='high'?'high':fcD.level==='mid'?'mid':'low'}" style="width:${Math.round(fcD.rate*100)}%"></i></div>
+            <div class="sc-sub">${fcD.expect!=null?('预计 '+fcD.expect+'/'+fcD.total+' 项'):'样本积累中'}</div>
+          </div>`:''}
+        </div>
+        ${cmd.next?`<div class="strat-next">🎯 ${esc(cmd.next)}</div>`:''}
+      </div>` : '';
+
     // 今日小贴士（每日轮换一位大人物的习惯）
     const bs=E.dailyTip();
     const tipHTML = bs? `
       <div class="card tip-card fade-in" id="tip-card">
-        <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> 今日小贴士</div>
+        <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> 今日锦囊</div>
         <div class="tip-who">${esc(bs.who)} <span class="tip-tag">${esc(bs.cat)}</span></div>
         <div class="tip-role">${esc(bs.tag)}</div>
         <div class="tip-habit">${esc(bs.habit)}</div>
         <div class="tip-txt">军师：${esc(bs.tip)}</div>
       </div>` : '';
 
+    const g = timeGreeting();
     let html = `
-      <div class="card strategist-cmd fade-in">
+      <div class="today-greet"><span class="ge">${g.icon}</span>${esc(g.text)}</div>
+
+      <div class="card strategist-cmd fade-in" title="点此打开军师会客厅" data-open-strategist>
         <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> ${esc(cmd.who)}</div>
         <div class="msg">${esc(cmd.msg)}</div>
       </div>
 
-      ${predictHTML}
+      <div class="strat-rail">
+        ${predictHTML}
+        ${stratHTML}
+        ${tipHTML}
+      </div>
 
       <div class="quick-add">
         <input id="quick-input" placeholder="一句话生成待办，如：明早去图书馆背30个单词顺便打印资料" />
@@ -88,11 +186,12 @@
         <button class="btn ghost sm" id="route-btn">顺路</button>
       </div>
 
-      ${tipHTML}
-
-      <div class="row between mt12" style="margin:14px 2px 4px">
-        <div class="card-title">♟️ 今日棋局</div>
-        <div class="card-sub">${tasks.length} 项 · 拖动手柄可排序</div>
+      <div class="today-head">
+        <div class="card-title">♟️ 今日落子</div>
+        ${tasks.length?`<div class="today-prog" title="已完成 ${doneN}/${tasks.length}">
+          <div class="today-prog-bar"><i style="width:${donePct}%"></i></div>
+          <span class="today-prog-txt">${doneN}/${tasks.length}</span>
+        </div>`:''}
       </div>
       <div id="task-list">${renderTaskList(tasks)}</div>
     `;
@@ -112,6 +211,12 @@
 
     view.innerHTML = html;
     bindToday(tasks);
+    // 「军师预判 / 军师指令」两张卡点开即唤起军师会客厅，
+    // 把首页的军师信号与「摆渡人指令」归到同一入口，用户一眼知道军师在哪
+    view.querySelectorAll('[data-open-strategist]').forEach(c=>{
+      c.classList.add('clickable-strategist');
+      c.addEventListener('click',()=>{ const o=$('#open-strategist'); if(o) o.click(); });
+    });
   }
 
   let showDoneTasks=false;   // 任务多时：默认收起「已完成」，把视线留给还没做的事
@@ -161,7 +266,7 @@
       } else if(size === 'expanded'){
         const d = E.decompose(t) || { steps:[] };
         const steps = (d.steps||[]).slice(0,3).map((s,i)=>
-          `<div class="ts-row"><i>${i+1}</i><span>${esc(s)}</span></div>`).join('');
+          `<div class="ts-row"><i>${i+1}</i><span>${esc(typeof s==='string'? s : s.text)}</span>${(s&&s.min)?`<b class="ts-min">${s.min}′</b>`:''}</div>`).join('');
         html += `
         <div class="task expanded ${t.done?'done':''}" data-sortable data-id="${t.id}">
           <div class="task-handle">⠿</div>
@@ -233,14 +338,17 @@
       const place=routeInput.value.trim(); if(!place){ toast('先说去哪～'); return; }
       const list=E.routeSuggestions(place);
       if(!list.length){ toast('暂未匹配到顺路任务，你可一句话添加'); return; }
+      const bw = list._byway;
       const rows=list.map((r,i)=>`
         <label class="route-opt">
           <input type="checkbox" checked data-idx="${i}">
-          <span class="ro-title">${esc(r.title)}</span>
+          <span class="ro-title">${esc(r.title)}${r.score?`<b class="ro-score" title="顺路度">${r.score}</b>`:''}</span>
           <span class="ro-meta">${r.duration}′ · ${TYPE_LABEL[r.type].split(' ')[0]}${r.goalId&&S.getGoal(r.goalId)?' · '+esc(S.getGoal(r.goalId).title):''}</span>
+          ${r.reason?`<span class="ro-reason">${esc(r.reason)}</span>`:''}
         </label>`).join('');
       modal('🚶 顺路任务推荐：'+esc(place),`
-        <p class="small muted">军师按地点为你挑了这些，勾选后加入今日棋局。</p>
+        <p class="small muted">${bw&&bw.note?esc(bw.note):'军师按地点为你挑了这些，勾选后加入今日棋局。'}</p>
+        ${bw&&bw.chainMin?`<div class="route-chain">🧭 打包办完前 ${bw.chain.length} 件约 ${bw.chainMin} 分钟，跑一趟就够</div>`:''}
         <div class="route-list mt12">${rows}</div>
         <button class="btn primary block mt12" id="route-add-all">加入今日棋局</button>
       `,body=>{
@@ -363,11 +471,12 @@
         <div class="analy">💡 对你的分析：${esc(r.analyze)}（${esc(r.weekly)}）</div>
         <div class="reco-foot">
           <span class="muted small">军师为你布下的一颗新棋</span>
-          <button class="btn primary sm" data-addreco="${esc(r.title)}|${esc(r.cat)}|${esc(r.weekly)}">加入棋谱</button>
+          <button class="btn primary sm" data-addreco="${esc(r.title)}|${esc(r.cat)}|${esc(r.weekly)}">加入谋局</button>
         </div>
       </div>`).join('');
 
     view.innerHTML = `
+      <div class="cal-title" style="margin:0 0 10px">📋 谋局</div>
       <div class="card reco-card">
         <div class="card-title"><img class="title-avatar" src="assets/img/strategist-avatar.png" alt=""> 军师已为你布好局</div>
         <p class="small muted mt8">大目标，军师替你拆成每天的小任务。先做手上的，做完自动推下一步。</p>
@@ -385,14 +494,14 @@
       S.advanceStage(x.dataset.advance); toast('已推进到下一阶段，明日任务已更新'); renderManual();
     }));
     view.querySelectorAll('[data-complete]').forEach(x=>x.addEventListener('click',()=>{
-      if(confirm('确认这个目标已经完成？军师会为你升级代号并推荐下一局。')){
+      confirm('完成目标','确认这个目标已经完成？\n军师会为你升级代号并推荐下一局。',()=>{
         U.completeGoal(x.dataset.complete); toast('🏆 目标达成，代号升级！'); renderManual(); updateTopbar();
-      }
+      });
     }));
     view.querySelectorAll('[data-delgoal]').forEach(x=>x.addEventListener('click',()=>{
-      if(confirm('删除这个目标吗？\n它名下的任务也会一并移除。\n——军师会记得你走过的每一局，但此目标将不再出现在棋谱里。')){
+      confirm('删除目标','删除这个目标吗？\n它名下的任务也会一并移除。\n——军师会记得你走过的每一局，但此目标将不再出现在谋局里。',()=>{
         S.deleteGoal(x.dataset.delgoal); toast('目标已移除。想再开局的时候，随时立一个新目标。'); renderManual(); updateTopbar();
-      }
+      }, true);
     }));
     view.querySelectorAll('[data-addreco]').forEach(x=>x.addEventListener('click',()=>{
       const [title,cat,weekly]=x.dataset.addreco.split('|');
@@ -431,7 +540,7 @@
     const goal=S.addGoal({ title, category:cat, type:'generic', color:pickColor(),
       current:'新棋局', target:'由军师陪你达成', dailyTime:20, weeklyDays:5,
       resources:'—', stages:defaultStages() });
-    toast(`已加入棋谱：${title}`); renderManual(); updateTopbar();
+    toast(`已加入谋局：${title}`); renderManual(); updateTopbar();
   }
   function inferType(t){
     if(/六级|英语|单词|听力|阅读|翻译/.test(t)) return 'cet6';
@@ -482,6 +591,7 @@
       const refine=n.refined?`<div class="refine-box">
         ${tags.length?`<div class="refine-tags">${tags.join('')}</div>`:''}
         <div class="refine-advice">军师建议：<b>${esc(r.suggestion||'')}</b>${r.adviceLevel>1?`<span class="rt lv">进阶解法 ${r.adviceLevel}</span>`:''}</div>
+        ${r.domain?`<div class="refine-domain">💡 ${esc(r.domain)}</div>`:''}
         ${r.taskId?'<div class="refine-linked">已关联今日任务</div>':''}</div>`:'';
       return `<div class="card note-card"><div class="note-text">${esc(n.text)}</div>
         <div class="note-meta"><span class="emotion ${emoCls}">${emoTxt}</span><span class="tag">${esc(n.date)}</span></div>${refine}</div>`;
@@ -493,14 +603,24 @@
         <div class="d-line" style="white-space:pre-wrap">${esc(d.content)}</div>
       </div>`).join(''):`<div class="empty"><div class="em">📔</div><p>还没有日记。<br>先记几笔随记，再一键整理成日记。</p></div>`;
 
-    // 军师会客厅：展示最近一条情绪回应（若有）
+    // 军师会客厅：情绪回应 + 可直接提问（离线意图问答，不联网）
     const comfortNote=st.notes.find(n=>n.comfort);
-    const comfortHTML = comfortNote? `
+    let asks=[];
+    try{ asks=O.suggestedQuestions()||[]; }catch(e){ asks=[]; }
+    const comfortHTML = `
       <div class="card comfort-card">
         <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> 军师会客厅</div>
-        <div class="msg">${esc(comfortNote.comfort)}</div>
-        <div class="comfort-from">—— 回应你的随记：「${esc(comfortNote.text.slice(0,24))}${comfortNote.text.length>24?'…':''}」</div>
-      </div>` : '';
+        ${comfortNote?`<div class="msg">${esc(comfortNote.comfort)}</div>
+        <div class="comfort-from">—— 回应你的随记：「${esc(comfortNote.text.slice(0,24))}${comfortNote.text.length>24?'…':''}」</div>`:''}
+        <div class="ask-box mt12">
+          <input id="ask-input" placeholder="问军师：我这周能完成多少？" />
+          <button class="btn primary sm" id="ask-btn">问</button>
+        </div>
+        <div class="ask-chips mt8">
+          ${asks.map(q=>`<button class="ask-chip" data-q="${esc(q)}">${esc(q)}</button>`).join('')}
+        </div>
+        <div class="ask-answer mt12" id="ask-answer" hidden></div>
+      </div>`;
 
     view.innerHTML=`
       <div class="card">
@@ -520,6 +640,27 @@
     bindNotes();
   }
   function bindNotes(){
+    // 军师会客厅 · 提问：意图识别 → 调算法 → 用数据回答（全程离线）
+    const doAsk=(q)=>{
+      const inp=$('#ask-input'); if(!inp) return;
+      if(q) inp.value=q;
+      const text=(inp.value||'').trim();
+      if(!text){ toast('想问什么？点上面的问题也行'); return; }
+      let ans=null;
+      try{ ans=E.ask(text); }catch(e){ ans=null; }
+      const box=$('#ask-answer');
+      if(!box) return;
+      box.hidden=false;
+      box.innerHTML=`<div class="aa-q">${esc(text)}</div>
+        <div class="aa-a">${esc(ans&&ans.text? ans.text : '这个我还没学会。换个问法试试，比如「我今天该先做什么」。')}</div>`;
+      inp.value='';
+    };
+    const ab=$('#ask-btn');      if(ab) ab.addEventListener('click',()=>doAsk());
+    const ai=$('#ask-input');    if(ai) ai.addEventListener('keydown',e=>{ if(e.key==='Enter') doAsk(); });
+    view.querySelectorAll('.ask-chip').forEach(c=>{
+      c.addEventListener('click',()=>doAsk(c.dataset.q));
+    });
+
     $('#note-add').addEventListener('click',()=>{
       const v=$('#note-input').value.trim(); if(!v){ toast('写点什么'); return; }
       const note=S.addNote({text:v});
@@ -581,7 +722,7 @@
     }).join('');
 
     view.innerHTML=`
-      <div class="card"><div class="card-title">📊 棋力</div>${stat}</div>
+      <div class="card"><div class="card-title">📊 战绩</div>${stat}</div>
       <div class="card chart-card"><div class="card-title">近7天完成率</div>${bars}</div>
       <div class="card chart-card"><div class="card-title">目标进度</div>${goalRows}</div>
       <div class="card hint-card">
@@ -912,14 +1053,15 @@
     // 卡片上的 + 添加任务
     view.querySelectorAll('[data-adddate]').forEach(b=>b.addEventListener('click',()=>{
       const ds=b.dataset.adddate;
-      const txt=prompt(`为 ${ds} 添加一条待办：`);
-      if(txt && txt.trim()){
-        const parsed=E.parseSentence(txt.trim());
-        const spec=Array.isArray(parsed)?(parsed[0]||null):((parsed&&parsed.tasks)?parsed.tasks[0]:null);
-        const taskSpec = spec || {title:txt.trim(), duration:15, type:'fragment', goalId:null};
-        S.addTask(ds, {title:taskSpec.title, duration:taskSpec.duration, type:taskSpec.type, goalId:taskSpec.goalId, source:'manual'});
-        toast('已落子'); renderCalendar(); updateTopbar();
-      }
+      prompt('添加待办', `为 ${ds} 添加一条待办：`, txt=>{
+        if(txt && txt.trim()){
+          const parsed=E.parseSentence(txt.trim());
+          const spec=Array.isArray(parsed)?(parsed[0]||null):((parsed&&parsed.tasks)?parsed.tasks[0]:null);
+          const taskSpec = spec || {title:txt.trim(), duration:15, type:'fragment', goalId:null};
+          S.addTask(ds, {title:taskSpec.title, duration:taskSpec.duration, type:taskSpec.type, goalId:taskSpec.goalId, source:'manual'});
+          toast('已落子'); renderCalendar(); updateTopbar();
+        }
+      }, {placeholder:'如：背30个单词，顺路打印资料'});
     }));
   }
 
@@ -985,6 +1127,29 @@
       <div class="bar-row"><span class="day" style="width:auto;flex:1;font-weight:600">${esc(g.title)}</span>
         <div class="bar-track" style="flex:2"><i style="width:${g.prog}%;background:${g.status==='done'?'var(--mint)':'var(--purple)'}"></i></div>
         <span class="pct">${g.status==='done'?'✓':esc(g.stage)}</span></div>`).join('');
+
+    // 军师预测：明日完成率 / 本周预计 / 各目标达成日期（都是离线推算出来的数）
+    const f = a.forecast;
+    const forecastHTML = f? `
+      <div class="card fc-card">
+        <div class="card-title">🔭 军师预测</div>
+        <div class="stat-grid mt12">
+          <div class="stat-card blue"><div class="num">${Math.round(f.tomorrow.rate*100)}%</div><div class="lab">明日完成率</div></div>
+          <div class="stat-card purple"><div class="num" style="font-size:19px">${f.week.predWeekTotal}<i style="font-size:12px">/${f.week.totalSum}</i></div><div class="lab">本周预计落子</div></div>
+          <div class="stat-card mint"><div class="num">${Math.round(f.week.predWeekRate*100)}%</div><div class="lab">本周预计完成率</div></div>
+          <div class="stat-card pink"><div class="num" style="font-size:15px;line-height:1.5;margin-top:4px">${f.streak&&f.streak.hold?'已保住':(f.streak?Math.round(f.streak.prob*100)+'%':'—')}</div><div class="lab">今日连续概率</div></div>
+        </div>
+        <p class="small muted mt8">${esc(f.week.verdict)}</p>
+        ${(f.tomorrow.factors&&f.tomorrow.factors.length)? `<div class="fc-factors mt8">${f.tomorrow.factors.map(x=>`<span class="fc-f">${esc(x.k)} ${x.v>1?'+':''}${Math.round((x.v-1)*100)}% · ${esc(x.txt)}</span>`).join('')}</div>`:''}
+        ${(f.goals&&f.goals.length)? `<div class="mt12"><div class="report-lab">目标达成预测</div>${f.goals.map(g=>`
+          <div class="fc-goal">
+            <div class="fg-head"><b>${esc(g.goal.title)}</b><span class="fg-v ${g.verdict}">${esc(g.verdictCN)}</span></div>
+            <div class="fg-line">进度 ${g.progress}% · 时间已过 ${g.timePast}% · 当前 ${g.speed} 项/天</div>
+            <div class="fg-line">预计 ${esc(g.arrive)} 完成${g.late>0?`（晚 ${g.late} 天）`:''} · 距目标 ${g.daysToDeadline} 天</div>
+            <div class="fg-tip">${esc(g.tip)}</div>
+          </div>`).join('')}</div>`:''}
+      </div>` : '';
+
     view.innerHTML=`
       <div class="card">
         <div class="card-title"><img class="title-avatar" src="assets/img/strategist-avatar.png" alt=""> 执棋者·周报</div>
@@ -997,6 +1162,7 @@
         </div>
       </div>
       <div class="card chart-card"><div class="card-title">目标进度</div>${goalRows}</div>
+      ${forecastHTML}
       <div class="card hint-card">
         <div class="card-title">军师点评</div>
         <p class="small muted mt8">${esc(a.biggest||'')}</p>
@@ -1006,9 +1172,17 @@
       </div>
       <div class="card hint-card">
         <div class="card-title">下周布局</div>
-        ${a.next&&a.next.length
-          ? a.next.map(x=>`<p class="small muted mt8">· ${esc(x)}</p>`).join('')
-          : '<p class="small muted mt8">主线按当前阶段继续推进；薄弱项我会加大排程比例。你只管照做，明天打开棋局看新指令。</p>'}
+        ${a.layout&&a.layout.alloc&&a.layout.alloc.length? `
+          <div class="mt8">${a.layout.alloc.map(x=>`
+            <div class="nw-alloc">
+              <div class="nwa-row"><span class="nwa-name">${esc(x.title)}</span>
+                <span class="nwa-bar"><i style="width:${x.share}%"></i></span>
+                <span class="nwa-pct">${x.share}%</span></div>
+              <div class="nwa-why">${esc(x.reason)}</div>
+            </div>`).join('')}</div>`:''}
+        ${a.layout&&a.layout.days? `<div class="mt12"><div class="report-lab">每日节奏</div>${a.layout.days.map(d=>`<p class="small muted mt8">· ${esc(d.note)}</p>`).join('')}</div>`:''}
+        ${a.next&&a.next.length? `<div class="mt12"><div class="report-lab">策略</div>${a.next.map(x=>`<p class="small muted mt8">· ${esc(x)}</p>`).join('')}</div>`:''}
+        ${(!a.layout&&!(a.next&&a.next.length))?'<p class="small muted mt8">主线按当前阶段继续推进；薄弱项我会加大排程比例。你只管照做，明天打开棋局看新指令。</p>':''}
       </div>`;
   }
 
@@ -1051,7 +1225,7 @@
       </div>`).join('');
     view.innerHTML=`
       <div class="card reco-card">
-        <div class="card-title">💡 军师小贴士</div>
+        <div class="card-title">💡 军师锦囊</div>
         <p class="small muted mt8">来自商业大佬、投资家、作家、思想家与书中人物、科学家、运动员、自律明星。今日轮到 <b>${esc(cur.who)}</b>；全库共 <b>${list.length}</b> 条，每天换一位，慢慢收集属于你的习惯。</p>
       </div>
       <div class="grid g2 g3 section-gap">${items}</div>`;
@@ -1071,8 +1245,8 @@
     else if(current==='report') renderReport();
     else if(current==='timeline') renderTimeline();
     else if(current==='tips') renderTips();
-    // 高亮导航：一级视图直接高亮；二级/三级视图回落到「更多」入口
-    const primarySet={'today':1,'manual':1};
+    // 高亮导航：一级(核心循环)视图直接高亮；二级/三级视图回落到「更多」入口
+    const primarySet={'today':1,'calendar':1,'manual':1,'notes':1};
     const onMore = !primarySet[current];
     document.querySelectorAll('.tab').forEach(t=>{
       if(t.dataset.view==='more') t.classList.toggle('active', onMore);
@@ -1153,5 +1327,5 @@
     container.addEventListener('pointercancel',end);
   }
 
-  window.ZQ.ui = { render, navigate, toast, modal, closeModal, closeStrategist, updateTopbar };
+  window.ZQ.ui = { render, navigate, toast, modal, closeModal, closeStrategist, confirm, prompt, updateTopbar };
 })();
