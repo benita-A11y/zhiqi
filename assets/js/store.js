@@ -277,7 +277,12 @@
   // 删除目标：连同它名下的派生任务一并移除，避免出现孤儿任务
   function deleteGoal(id){
     _state.goals = _state.goals.filter(g=>g.id!==id);
-    if(_state.tasks) _state.tasks = _state.tasks.filter(t=>t.goalId!==id);
+    // _state.tasks 是 { 日期: [任务] } 结构，需逐日过滤，不能直接对整体 .filter
+    if(_state.tasks && typeof _state.tasks==='object'){
+      for(const d in _state.tasks){
+        _state.tasks[d] = _state.tasks[d].filter(t=>t.goalId!==id);
+      }
+    }
     save();
   }
 
