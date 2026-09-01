@@ -6,6 +6,7 @@
 (function(){
   const S = window.ZQ.store;
   const B = window.ZQ.brain;   // 军师大脑：情境向量 / 分析算法 / 规则矩阵 / 话术库
+  const O = window.ZQ.oracle;  // 算法中台：精力模型 / 负荷 / 预测引擎 / 顺路 / 拆解 / 布局
 
   /* =========================================================
      一、周计划生成器（目标 → 阶段 → 周任务）
@@ -406,12 +407,22 @@
     '数学':'数学先补基础概念。'
   };
 
+  /* 指令裁剪：军师的指令贵在准，不在多。超过 N 句就截，避免几段话堆成一大坨 */
+  function takeSentences(text, n){
+    const raw = String(text||'').trim();
+    if(!raw) return '';
+    const parts = raw.split('。').filter(s=> s.trim());
+    if(parts.length <= n) return raw;
+    return parts.slice(0, n).map(s=> s + '。').join('');
+  }
+
   function strategistCommand(dateStr){
     const st = S.load();
     // ① 军师大脑：情境向量 + 规则矩阵 → 决定「今天该说什么」
     //    涵盖：主线目标进度 / 断档风险 / 情绪告急 / 难度自适应 / 时段 / 日历节奏 / 连续天数
+    //    先裁到 2 句，给后面的「领域打法」和「此刻状态」留出位置
     let msg = '';
-    try{ const b = B.command(dateStr); if(b && b.msg) msg = b.msg; }catch(e){ msg = ''; }
+    try{ const b = B.command(dateStr); if(b && b.msg) msg = takeSentences(b.msg, 2); }catch(e){ msg = ''; }
 
     // ② 领域层：brain 决定"何时说"，这里补"怎么打"——针对主目标阶段的实战建议
     const active = st.goals.filter(g=>g.status==='active');
@@ -425,9 +436,29 @@
     const weak = weakPointOf(dateStr);
     if(weak) lines.push(WEAK_TIP[weak] || `注意你的薄弱点「${weak}」。`);
 
+    // ③ 算法中台：把「此刻的真实状态」也算进指令
+    //    精力曲线 / 负荷指数 / 今日预测 / 连续天数续接概率 —— 都是实时算出来的数
+    let energy=null, load=null, streak=null, forecast=null, next=null;
+    try{ energy = O.energyModel(dateStr); load = O.loadIndex(dateStr); }catch(e){ energy=null; load=null; }
+    try{ streak = O.forecastStreak(); }catch(e){ streak=null; }
+    try{ forecast = O.forecastDay(dateStr); }catch(e){ forecast=null; }
+    try{ const nba = B.nextBestAction(); next = nba? nba.text : ''; }catch(e){ next=''; }
+
+    // 只在"异常"时插话，避免每天复读同一句状态播报
+    if(energy){
+      if(energy.energy < 45) lines.push('现在精力' + energy.levelCN + '（' + energy.energy + '），先挑轻的做，别开新的大工程。');
+      else if(energy.energy >= 80) lines.push('现在精力充沛（' + energy.energy + '），把最难的一件放在这会。');
+    }
+    if(load && load.level==='overload')
+      lines.push('今天的量排多了（' + load.minutes + '/' + load.capacity + ' 分钟），先砍掉三成再开始。');
+    if(streak && !streak.hold && streak.prob < 0.6 && (st.undercover.streak||0) >= 3)
+      lines.push(streak.note);
+
     if(lines.length) msg += (msg? ' ' : '') + lines.join(' ');
     if(!msg) msg = '今天先落一子，后面我替你安排。';
-    return { who:'摆渡人指令', msg };
+    // 最终控制在 4 句以内：一条指令说太多，等于什么都没说
+    msg = takeSentences(msg, 4);
+    return { who:'摆渡人指令', msg, energy, load, streak, forecast, next };
   }
 
   /* =========================================================
@@ -554,9 +585,11 @@
     const text = (note && note.text) || '';
     const readonly = !!(opts && opts.readonly);
 
-    // ① 军师大脑：结构化抽取（21 类情绪 + 19 类主题 + 9 类阻碍 + 数量指标）
+    // ① 结构化抽取：算法中台（brain 的 19 类主题 + 中台补充的 8 类：目标/人际/金钱/课程/
+    //    资料/身体/环境/娱乐）+ 21 类情绪 + 9 类阻碍 + 数量指标
     let ex = null;
-    try{ ex = B.extract(text); }catch(e){ ex = null; }
+    try{ ex = O.extractV2(text); }
+    catch(e){ try{ ex = B.extract(text); }catch(e2){ ex = null; } }
 
     // ② 兜底：brain 不可用时退回原关键词逻辑
     if(!ex){
@@ -583,9 +616,10 @@
       }
     }
 
-    // ④ 建议：去重 + 递进（同一主题第二次遇到给进阶解法，不再复读同一句）
+    // ④ 建议：中台建议 V2（主题扩到 30+，每主题多阻碍层，叠加领域知识），去重 + 递进
     let sg = null;
-    try{ sg = B.suggest(ex, readonly); }catch(e){ sg = null; }
+    try{ sg = O.suggestV2(ex, readonly); }
+    catch(e){ try{ sg = B.suggest(ex, readonly); }catch(e2){ sg = null; } }
     const suggestion = (sg && sg.text) ? sg.text
       : (keys.length ? (SUGGEST[keys[0]] || '继续记录，军师会慢慢读懂你。') : '继续记录，军师会慢慢读懂你。');
 
@@ -601,7 +635,8 @@
       when: ex.when || null, where: ex.where || null,
       intensity: ex.intensity || 1,
       summary: ex.summary || '',
-      adviceLevel: sg? sg.level : 0
+      adviceLevel: sg? sg.level : 0,
+      domain: (sg && sg.domain) || ''     // 领域知识：告诉用户「为什么这么做」
     };
   }
 
@@ -729,19 +764,26 @@
       });
     } else body += '· 今日无随记\n';
 
-    // 军师点评
+    // 军师点评：算法中台多因子点评（完成度 vs 近两周均值 / 实际投入时长 / 落子时段 /
+    //           未完成的收尾建议 / 连续天数续接概率 / 目标推进 / 当日情绪）
     body += `\n摆渡人点评：\n`;
-    if(done.length && undone.length===0){
-      body += `· 今日全部落子，压了「拖延」一头。\n`;
-    } else if(done.length){
-      body += `· 完成 ${done.length} 项，还有 ${undone.length} 项没收尾，明天补上。\n`;
+    let comments = [];
+    try{ comments = O.reviewComment(dateStr) || []; }catch(e){ comments = []; }
+    if(comments.length){
+      comments.forEach(c=> body += `· ${c.text}\n`);
     } else {
-      body += `· 今天几乎空手而归，明天先落最小一子。\n`;
+      if(done.length && undone.length===0){
+        body += `· 今日全部落子，压了「拖延」一头。\n`;
+      } else if(done.length){
+        body += `· 完成 ${done.length} 项，还有 ${undone.length} 项没收尾，明天补上。\n`;
+      } else {
+        body += `· 今天几乎空手而归，明天先落最小一子。\n`;
+      }
+      const weak = weakPointOf(dateStr);
+      if(weak) body += `· 薄弱点「${weak}」已记录，明日针对性推进。\n`;
+      const streak = st.undercover.streak;
+      if(streak>=3) body += `· 连续 ${streak} 天，节奏稳，这是大人物该有的样子。\n`;
     }
-    const weak = weakPointOf(dateStr);
-    if(weak) body += `· 薄弱点「${weak}」已记录，明日针对性推进。\n`;
-    const streak = st.undercover.streak;
-    if(streak>=3) body += `· 连续 ${streak} 天，节奏稳，这是大人物该有的样子。\n`;
     // 明日聚焦
     const tomorrow = S.fmtDate(S.shiftDay(d,1));
     ensureDailyPlan(tomorrow);
@@ -826,8 +868,13 @@
     return '';
   }
 
-  /* 任务拆解建议（透传军师大脑，供长任务卡片展示「怎么下手」） */
+  /* 任务拆解建议：算法中台的拆解 V2（24 类语义模板 × 时长自适应 × 难度自适应），
+     每步带预估分钟；历史完成率低的任务，第一步会自动砍到最小，降低启动门槛。 */
   function decompose(t){
+    try{
+      const d = O.decomposeV2(t);
+      if(d && d.steps && d.steps.length) return d;
+    }catch(e){ /* 中台不可用时回落到大脑 */ }
     try{ return B.decompose(t); }catch(e){ return { title:(t&&t.title)||'', steps:[] }; }
   }
 
@@ -866,10 +913,18 @@
   }
 
   function predict(){
-    // ① 军师大脑：26 条规则矩阵全量命中（情境向量 → 规则 → 话术），按优先级取前 4 条
-    //    覆盖：断档风险 / 情绪告急 / 连续中断 / 冷启动 / 难度自适应 / 熬夜 / 弱项卡壳 /
+    // ① 算法中台：brain 的 26 条规则 + oracle 的 16 条扩展规则，去重后按优先级取前 5 条
+    //    brain 覆盖：断档风险 / 情绪告急 / 连续中断 / 冷启动 / 难度自适应 / 熬夜 / 弱项卡壳 /
     //          任务超载 / 完美主义卡住 / 目标倒计时 / 目标滞后·超前 / 偏科 / 未复盘 /
     //          拖延指数 / 趋势涨跌 / 黄金时段 / 夜间占比 / 强项 / 碎片未用 / 日历节奏
+    //    oracle 新增：精力错配 / 负荷超载·过轻 / 历史低谷日 / 连续天数概率 / 目标速度延期 /
+    //          明日偏重 / 历史低完成率任务 / 本周下滑 / 未记随记 / 周末断层 / 目标被冷落 /
+    //          小任务清场 / 同地点打包 / 完成率天花板 / 睡眠亏空 / 月末冲刺
+    try{
+      const out = O.predictionsV2(5);
+      if(out && out.length) return out;
+    }catch(e){ /* 中台不可用时回落到大脑 */ }
+    // ② 军师大脑：基础规则矩阵
     try{
       const out = B.predictions(4);
       if(out && out.length) return out;
@@ -946,17 +1001,32 @@
       {title:'居家拉伸10分钟', duration:10, type:'evening'}
     ]
   };
+  /* 顺路清单：算法中台打分排序（地点归一 → 目标紧迫度 / 关键词 / 历史完成率 / 时长适配 /
+     同地点打包），不再是简单的查表匹配。返回数组，并挂 _byway 供 UI 展示推荐理由。 */
   function routeSuggestions(place){
     if(!place || !place.trim()) return [];
-    const raw=place.trim();
-    const loc=matchLoc(raw) || raw;
+    const raw = place.trim();
+    let res = null;
+    try{ res = O.bywayEngine(raw); }catch(e){ res = null; }
+    if(res && res.items && res.items.length){
+      const arr = res.items.map(r=>({
+        title:r.title, duration:r.duration, type:r.type, goalId:r.goalId||null,
+        location:r.location || res.loc,
+        source: r.source==='route-inbox' ? 'route-inbox' : 'route',
+        _id: r._id || null, score:r.score, reason:r.reason, goalName:r.goalName||''
+      }));
+      arr._byway = res;   // { loc, note, chain, chainMin }
+      return arr;
+    }
+    // 兜底：原静态地点表 + 未排程清单匹配
+    const loc = matchLoc(raw) || raw;
     let list=(LOCATION_ROUTES[loc]||[]).map(r=>({...r, source:'route', location:loc}));
-    // 同时匹配「未排程清单」里提到该地点的任务
     S.unscheduled().forEach(t=>{
       if(t.title.indexOf(loc)>=0 || (t.location && t.location.indexOf(loc)>=0)){
         list.push({title:t.title, duration:t.duration, type:t.type, goalId:t.goalId, location:t.location||loc, source:'route-inbox', _id:t.id});
       }
     });
+    list._byway = { loc, note:'', chain:list.slice(0,3), chainMin: list.slice(0,3).reduce((s,x)=>s+(x.duration||10),0) };
     return list;
   }
 
@@ -1011,6 +1081,20 @@
       analysis.stats = deep.stats || {};
     }
 
+    // 算法中台：预测（明日 / 本周 / 各目标达成）+ 下周布局 + 精力与负荷
+    try{
+      analysis.forecast = {
+        tomorrow: O.forecastDay(S.fmtDate(S.shiftDay(S.today(), 1))),
+        week:     O.forecastWeek(),
+        streak:   O.forecastStreak(),
+        goals:    st.goals.filter(g=>g.status!=='done')
+                    .map(g=>{ try{ return O.forecastGoal(g); }catch(e){ return null; } })
+                    .filter(Boolean)
+      };
+    }catch(e){ analysis.forecast = null; }
+    try{ analysis.layout = O.nextWeekLayout(); }catch(e){ analysis.layout = null; }
+    try{ analysis.energy = O.energyModel(); analysis.load = O.loadIndex(); }catch(e){}
+
     return { year, week, total, done, rate, streak, notes, goals, analysis };
   }
 
@@ -1047,6 +1131,11 @@
     predict, pushPredictions,
     routeSuggestions, LOCATION_ROUTES,
     weeklyReport, tenYearMap, decompose,
-    currentBigshot, allBigshots, dailyTip, goalRemainingDays
+    currentBigshot, allBigshots, dailyTip, goalRemainingDays,
+    // 算法中台直通（供展示层取实时预测数据）
+    oracle:O, ask:(q)=>O.ask(q), suggestedQuestions:()=>O.suggestedQuestions(),
+    forecastAll:()=>O.forecastAll(), energyModel:()=>O.energyModel(),
+    loadIndex:()=>O.loadIndex(), nextWeekLayout:()=>O.nextWeekLayout(),
+    bywayEngine:(p)=>O.bywayEngine(p), reviewComment:(d)=>O.reviewComment(d)
   };
 })();
