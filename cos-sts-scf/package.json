@@ -1,0 +1,9 @@
+{
+  "name": "zhiqi-cos-sts-scf",
+  "version": "1.0.0",
+  "description": "执棋 PWA 私有桶 STS 临时密钥签发云函数",
+  "main": "index.js",
+  "dependencies": {
+    "tencentcloud-sdk-nodejs": "^4.0.0"
+  }
+}
