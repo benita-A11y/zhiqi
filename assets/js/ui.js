@@ -88,16 +88,6 @@
     });
   }
 
-  /* 随时段变化的温柔问候——无红点、无 badge，只是轻轻铺垫今天的氛围 */
-  function timeGreeting(){
-    const h = new Date().getHours();
-    if(h>=5  && h<11) return {icon:'🌤', text:'晨光正好，今天慢慢落子'};
-    if(h>=11 && h<14) return {icon:'🌞', text:'日头正暖，先吃口饭再战'};
-    if(h>=14 && h<18) return {icon:'🍃', text:'午后悠长，一件件来'};
-    if(h>=18 && h<21) return {icon:'🌆', text:'暮色起了，收个尾就好好歇着'};
-    return {icon:'🌙', text:'夜深了，轻一点，慢慢来'};
-  }
-
   /* =========================================================
      视图：今日棋局
      ========================================================= */
@@ -160,27 +150,19 @@
         <div class="tip-txt">军师：${esc(bs.tip)}</div>
       </div>` : '';
 
-    const g = timeGreeting();
     let html = `
-      <div class="today-greet"><span class="ge">${g.icon}</span>${esc(g.text)}</div>
-
       <div class="card strategist-cmd fade-in" title="点此打开军师会客厅" data-open-strategist>
         <div class="who"><img class="who-avatar" src="assets/img/strategist-avatar.png" alt=""> ${esc(cmd.who)}</div>
         <div class="msg">${esc(cmd.msg)}</div>
       </div>
 
-      <div class="strat-rail">
-        ${predictHTML}
-        ${stratHTML}
-        ${tipHTML}
-      </div>
-
       <div class="quick-add">
         <input id="quick-input" placeholder="一句话生成待办，如：明早去图书馆背30个单词顺便打印资料" />
+        <button class="route-mini" id="route-toggle" title="顺路任务：今天要去哪？" aria-label="顺路任务">🚶</button>
         <button class="btn primary" id="quick-add-btn">落子</button>
       </div>
 
-      <div class="route-add">
+      <div class="route-add" id="route-row" hidden>
         <span class="route-ic">🚶</span>
         <input id="route-input" placeholder="今天要去哪？如：图书馆" />
         <button class="btn ghost sm" id="route-btn">顺路</button>
@@ -194,6 +176,12 @@
         </div>`:''}
       </div>
       <div id="task-list">${renderTaskList(tasks)}</div>
+
+      <div class="strat-rail">
+        ${predictHTML}
+        ${stratHTML}
+        ${tipHTML}
+      </div>
     `;
 
     if(allDone){
@@ -369,6 +357,14 @@
     };
     $('#route-btn').addEventListener('click',doRoute);
     routeInput.addEventListener('keydown',e=>{ if(e.key==='Enter') doRoute(); });
+
+    // 顺路输入默认收起（低频），点 🚶 才展开——把首屏垂直空间还给「今天要做什么」
+    const rt=$('#route-toggle'), rrow=$('#route-row');
+    if(rt && rrow) rt.addEventListener('click',()=>{
+      rrow.hidden=!rrow.hidden;
+      rt.classList.toggle('on', !rrow.hidden);
+      if(!rrow.hidden) routeInput.focus();
+    });
 
     // 小贴士卡 → 跳转小贴士库
     const tipCard=$('#tip-card');
@@ -549,7 +545,7 @@
     if(/考公|公务员|编制|考编|申论/.test(t)) return 'civil';
     return 'generic';
   }
-  const COLORS=['#C5B4E3','#B4D4E3','#E3B4C5','#B4E3D4','#F2D2B6','#F4E6A8'];
+  const COLORS=['#C0B8DC','#C8E1EB','#F6D6E5','#ACE1DC','#F6BE9D','#F2E2C7'];
   function pickColor(){ const st=S.load(); return COLORS[st.goals.length%COLORS.length]; }
   function defaultStages(){ return [
     {name:'起步',weeks:'第1-2周',core:'建立节奏'},
@@ -1003,8 +999,7 @@
         <button class="btn ghost sm" id="m-next">›</button>
       </div>
       <div class="m-weekrow">${['一','二','三','四','五','六','日'].map(w=>`<span>${w}</span>`).join('')}</div>
-      <div class="m-grid">${cells.join('')}</div>
-      <p class="small muted mt12 center">点任意日期 → 进入「今日」视图安排那一天</p>`;
+      <div class="m-grid">${cells.join('')}</div>`;
   }
 
   function bindCalendar(){
@@ -1065,17 +1060,16 @@
     }));
   }
 
-  /* 跨容器拖放：按住任务卡任意位置即可拖动改期（事件委托，只绑定一次） */
+  /* 跨容器拖放：用「方向意图 + 长按」区分滚动与拖拽，避免想滑动看任务却误触拖动
+     （事件委托，只绑定一次） */
   function enableDnD(root){
     if(root.dataset.dndReady==='1') return;
     root.dataset.dndReady='1';
     let dragEl=null, clone=null, activeZone=null, fromDate=null, taskId=null, taskType=null;
-    root.addEventListener('pointerdown',e=>{
-      const card=e.target.closest('[data-drag]');
-      if(!card) return;
-      // 点复选框/按钮时交给 click，不启动拖动
-      if(e.target.closest('.cal-check') || e.target.closest('button') || e.target.closest('a')) return;
-      e.preventDefault();
+    let pending=null;                 // {card,x,y,t,timer,dragging}
+    const TH=8, HOLD=180;             // 位移阈值 8px；长按 180ms 主动拿起
+
+    function startDrag(card, e){
       dragEl=card; taskId=card.dataset.id; fromDate=card.dataset.date; taskType=card.dataset.type;
       const r=card.getBoundingClientRect();
       clone=card.cloneNode(true);
@@ -1083,9 +1077,11 @@
       clone.style.width=r.width+'px'; clone.style.left=r.left+'px'; clone.style.top=r.top+'px';
       document.body.appendChild(clone);
       card.classList.add('dragging');
-    });
-    root.addEventListener('pointermove',e=>{
-      if(!dragEl) return;
+      card.style.touchAction='none';          // 拖拽期间禁止容器继续滚动
+      try{ card.setPointerCapture(e.pointerId); }catch(_){}
+    }
+    function moveClone(e){
+      if(!clone) return;
       clone.style.left=(e.clientX-22)+'px'; clone.style.top=(e.clientY-18)+'px';
       const under=document.elementFromPoint(e.clientX,e.clientY);
       // 优先命中卡片内部的 drop-zone，其次命中整张卡片本身
@@ -1095,7 +1091,7 @@
         if(activeZone) activeZone.classList.remove('drop-active');
         activeZone=zone; if(activeZone) activeZone.classList.add('drop-active');
       }
-    });
+    }
     function end(){
       if(!dragEl) return;
       if(activeZone){
@@ -1109,12 +1105,43 @@
       }
       if(activeZone) activeZone.classList.remove('drop-active');
       dragEl.classList.remove('dragging');
+      dragEl.style.touchAction='';
       if(clone) clone.remove();
       dragEl=null; activeZone=null; clone=null;
       renderCalendar(); updateTopbar();
     }
-    root.addEventListener('pointerup',end);
-    root.addEventListener('pointercancel',end);
+    function clearPending(){ if(pending){ clearTimeout(pending.timer); pending=null; } }
+
+    root.addEventListener('pointerdown',e=>{
+      const card=e.target.closest('[data-drag]');
+      if(!card) return;
+      // 点复选框/按钮时交给 click，不启动拖动
+      if(e.target.closest('.cal-check') || e.target.closest('button') || e.target.closest('a')) return;
+      // 关键：先不 preventDefault、不建克隆——把「是否拖拽」的判断留给移动方向
+      pending={card, x:e.clientX, y:e.clientY, t:Date.now(), dragging:false};
+      pending.timer=setTimeout(()=>{
+        if(pending && !pending.dragging){          // 长按原地不动 → 主动拿起
+          pending.dragging=true; startDrag(card, e);
+        }
+      }, HOLD);
+    });
+    root.addEventListener('pointermove',e=>{
+      if(dragEl){ moveClone(e); e.preventDefault(); return; }
+      if(!pending) return;
+      const dx=e.clientX-pending.x, dy=e.clientY-pending.y;
+      const dist=Math.hypot(dx,dy);
+      if(dist>TH){
+        clearTimeout(pending.timer);
+        // 横向意图（跨日改期）或已按住较久 → 拖拽；纵向意图 → 交还原生滚动
+        if(Math.abs(dx)>Math.abs(dy) || (Date.now()-pending.t)>HOLD){
+          pending.dragging=true; startDrag(pending.card, e); e.preventDefault();
+        } else {
+          pending=null;                            // 竖向滑动 = 看任务，放弃拖拽
+        }
+      }
+    });
+    root.addEventListener('pointerup',()=>{ if(dragEl) end(); clearPending(); });
+    root.addEventListener('pointercancel',()=>{ if(dragEl) end(); clearPending(); });
   }
 
   /* =========================================================
@@ -1295,7 +1322,7 @@
       placeholder.style.border='2px dashed var(--purple)';
       placeholder.style.borderRadius='14px';
       placeholder.style.marginBottom='9px';
-      placeholder.style.background='rgba(197,180,227,.12)';
+      placeholder.style.background='rgba(192,184,220,.12)';
       dragEl.parentNode.insertBefore(placeholder, dragEl.nextSibling);
     });
     container.addEventListener('pointermove',e=>{
