@@ -800,25 +800,25 @@
      七、新目标推荐（基于画像 + 已有目标）
      ========================================================= */
   const RECO_CATALOG = [
-    {type:'archive', title:'建立个人学习档案', cat:'长期资产', color:'#B4D4E3', weekly:'20分钟/周',
+    {type:'archive', title:'建立个人学习档案', cat:'长期资产', color:'#C8E1EB', weekly:'20分钟/周',
       why:'你准备考公，政审需要完整的学习经历、获奖记录。现在整理，比大三再补轻松10倍。',
       analyze:'ISFJ 天生擅长整理保存，这是你的舒适区。每周只需20分钟，产出却能用一辈子。'},
-    {type:'calligraphy', title:'练字 / 书写规范', cat:'卷面竞争力', color:'#E3B4C5', weekly:'15分钟/天',
+    {type:'calligraphy', title:'练字 / 书写规范', cat:'卷面竞争力', color:'#F6D6E5', weekly:'15分钟/天',
       why:'考公申论卷面分能差5-10分，字好看是隐形加分项。',
       analyze:'每天15分钟描红，一个月就见效，成本低到没有理由不做。'},
-    {type:'finance', title:'个人财务管理', cat:'赚钱基本功', color:'#F2D2B6', weekly:'5分钟/天',
+    {type:'finance', title:'个人财务管理', cat:'赚钱基本功', color:'#F6BE9D', weekly:'5分钟/天',
       why:'你说想赚大钱——先懂钱怎么流动，才知道机会长什么样。',
       analyze:'每天记一笔收支，ISFJ 的条理性正好发挥，半年后你会看懂自己的消费性格。'},
-    {type:'search', title:'信息搜索能力', cat:'核心元技能', color:'#B4E3D4', weekly:'30分钟/周',
+    {type:'search', title:'信息搜索能力', cat:'核心元技能', color:'#ACE1DC', weekly:'30分钟/周',
       why:'考公岗位表、报名条件、经验帖，全靠自己搜。搜商=竞争力。',
       analyze:'每周练一次精准检索，以后查资料快人三倍。'},
-    {type:'posture', title:'体态管理', cat:'形象复利', color:'#C5B4E3', weekly:'20分钟/天',
+    {type:'posture', title:'体态管理', cat:'形象复利', color:'#C0B8DC', weekly:'20分钟/天',
       why:'面试第一眼是体态和气场，和你减重目标还能合并训练。',
       analyze:'靠墙站+散步，顺路就做，面试形象和体重一起拿。'},
-    {type:'current', title:'时政每日速览', cat:'考公常识', color:'#B4D4E3', weekly:'10分钟/天',
+    {type:'current', title:'时政每日速览', cat:'考公常识', color:'#C8E1EB', weekly:'10分钟/天',
       why:'行测常识和申论都吃时政，每天10分钟，考前不慌。',
       analyze:'碎片时间刷，ISFJ 的积累习惯正好用上。'},
-    {type:'oral', title:'英语口语磨耳朵', cat:'未来加分', color:'#E3B4C5', weekly:'10分钟/天',
+    {type:'oral', title:'英语口语磨耳朵', cat:'未来加分', color:'#F6D6E5', weekly:'10分钟/天',
       why:'六级之后若进外事/口岸类单位，口语是差异项。',
       analyze:'每天10分钟跟读，润物无声。'}
   ];
