@@ -43,7 +43,7 @@
   // 每个 goal 存 type，周计划由 engine 动态生成，保证可推进
   const GOAL_SEED = [
     {
-      id:'g_cet6', title:'英语六级', category:'考试提分', type:'cet6', color:'#C5B4E3',
+      id:'g_cet6', title:'英语六级', category:'考试提分', type:'cet6', color:'#C0B8DC',
       current:'369分（未过线）', target:'≥425分', dailyTime:60, weeklyDays:5,
       resources:'单词APP、历年真题、精听材料',
       stages:[
@@ -54,7 +54,7 @@
       ]
     },
     {
-      id:'g_computer', title:'计算机二级', category:'证书考试', type:'computer', color:'#B4D4E3',
+      id:'g_computer', title:'计算机二级', category:'证书考试', type:'computer', color:'#C8E1EB',
       current:'零基础备考', target:'通过（MS/语言任选）', dailyTime:45, weeklyDays:4,
       resources:'题库APP、操作题视频',
       stages:[
@@ -65,7 +65,7 @@
       ]
     },
     {
-      id:'g_weight', title:'减重塑形', category:'体态健康', type:'weight', color:'#E3B4C5',
+      id:'g_weight', title:'减重塑形', category:'体态健康', type:'weight', color:'#F6D6E5',
       current:'53kg / 168cm', target:'44kg（88斤）', dailyTime:40, weeklyDays:6,
       resources:'体重秤、散步路线、饮食记录',
       stages:[
@@ -75,7 +75,7 @@
       ]
     },
     {
-      id:'g_civil', title:'考公 / 考编', category:'长期布局', type:'civil', color:'#B4E3D4',
+      id:'g_civil', title:'考公 / 考编', category:'长期布局', type:'civil', color:'#ACE1DC',
       current:'信息收集阶段', target:'上岸国家单位', dailyTime:30, weeklyDays:3,
       resources:'岗位表、经验帖、时政',
       stages:[
@@ -120,6 +120,58 @@
 
   /* ---------- 读写 ---------- */
   let _state = null;
+  let _isCloud = false;        // 是否启用了 COS 云同步
+  let _cloudStatusCb = null;   // 云同步状态回调（UI 可注册，用于轻提示）
+
+  /* 云同步配置：由 index.html 顶部 window.ZQ_CLOUD 注入
+     { bucket:'zhiqi-125xxxxxxx', region:'ap-guangzhou', key:'data.json',
+       scfUrl:'https://xxx.apigw.tencentcs.com/release/sts' }
+     - 私有桶 + STS 临时密钥：永久密钥只在 SCF 环境变量，永不落前端。
+     - 未配置（或占位符）→ 退化为纯本地模式，行为与旧版一致、离线可用。
+     - scfUrl 为 SCF API 网关地址（匿名可访问，但函数内校验来源域名）。 */
+  function _resolveCloud(){
+    const c = (typeof window!=='undefined') ? window.ZQ_CLOUD : null;
+    if(!c || !c.bucket || !c.region || !c.scfUrl) return null;
+    // 占位符（未真正填桶名/网关）→ 视为未配置，避免每次保存都打无效请求
+    if(/替换|your[-_]?|你的|example|占位|xxx|appid/i.test(String(c.bucket))) return null;
+    if(/替换|your[-_]?|你的|example|占位|xxx/i.test(String(c.scfUrl))) return null;
+    return c;
+  }
+  const CLOUD = _resolveCloud();
+  let _cos = null;          // COS SDK 实例（延迟创建）
+  let _cloudETag = null;    // 最近一次云端读取的 ETag，用于 If-Match 乐观并发
+  function markSync(ts){ if(_state && _state.meta){ _state.meta.lastSync = ts || Date.now(); } }
+  function emitCloudStatus(s){ if(_cloudStatusCb) try{ _cloudStatusCb(s); }catch(e){} }
+
+  /* 延迟创建 COS 实例：通过 getAuthorization 回调从 SCF 拉 STS 临时密钥。
+     SDK 会在密钥临近过期时自动重新回调刷新，前端无需手动管理时效。
+     若 COS SDK（CDN）未加载成功，返回 null → 自动降级纯本地，避免白屏。 */
+  function _ensureCos(){
+    if(_cos) return _cos;
+    if(typeof window.COS === 'undefined'){
+      console.warn('[云同步] COS SDK 未加载（可能离线/CDN 失败），降级为本地模式');
+      return null;
+    }
+    _cos = new window.COS({
+      getAuthorization(options, callback){
+        fetch(CLOUD.scfUrl, { method:'GET', cache:'no-store', headers:{ 'Accept':'application/json' } })
+          .then(function(r){ return r.ok ? r.json() : Promise.reject(new Error('HTTP '+r.status)); })
+          .then(function(data){
+            const c = (data && data.Credentials) || data || {};
+            callback({
+              TmpSecretId: c.TmpSecretId,
+              TmpSecretKey: c.TmpSecretKey,
+              XCosSecurityToken: c.Token || c.SessionToken || c.XCosSecurityToken,
+              StartTime: data.StartTime || Math.floor(Date.now()/1000),
+              ExpiredTime: data.ExpiredTime
+            });
+          })
+          .catch(function(err){ console.warn('[STS] 获取临时密钥失败', err && err.message); });
+      }
+    });
+    return _cos;
+  }
+
   function load(){
     if(_state) return _state;
     try{
@@ -129,10 +181,117 @@
     if(!_state || !_state.goals){ _state = buildSeed(); save(); }
     return _state;
   }
+
+  /* 异步初始化：先确保 localStorage 就绪，再尝试用 STS 临时密钥从私有桶拉最新快照。
+     取「lastSync 更新」的一方（last-write-wins），保证多端最终一致；
+     任何失败都静默回退本地，绝不让页面白屏。 */
+  async function init(){
+    load();
+    _isCloud = !!CLOUD && !!_ensureCos();
+    if(!_isCloud) return _state;
+    try{
+      const remote = await _pullRemote();
+      if(!remote){ emitCloudStatus('local-fallback'); return _state; }
+      const rTs = (remote.meta && remote.meta.lastSync) || 0;
+      const lTs = (_state.meta && _state.meta.lastSync) || 0;
+      if(rTs > lTs){
+        _state = remote; save(); emitCloudStatus('synced');
+      }else{
+        emitCloudStatus('local-newer');
+      }
+    }catch(e){
+      console.warn('[云同步] 读取失败，使用本地数据：', e && e.message); emitCloudStatus('fail');
+    }
+    return _state;
+  }
+
+  /* 从私有桶拉取 data.json（STS 签名，DataType=string 直接拿文本） */
+  async function _pullRemote(){
+    const cos = _cos;
+    const res = await cos.getObject({
+      Bucket: CLOUD.bucket, Region: CLOUD.region, Key: CLOUD.key||'data.json',
+      DataType: 'string'
+    });
+    _cloudETag = res.ETag || null;
+    let obj;
+    try{ obj = JSON.parse(res.Body); }catch(e){ return null; }
+    if(!obj || !obj.goals) return null;
+    return obj;
+  }
+
+  /* 写：永远先落本地（离线兜底），再异步防抖 PUT 到私有桶（If-Match 乐观并发）。
+     云端失败/冲突不抛错、不影响本地，保证「至少本地可用」。 */
+  let _putTimer = null;
   function save(){
+    markSync(Date.now());
     try{ localStorage.setItem(KEY, JSON.stringify(_state)); }
     catch(e){ console.warn('保存失败（可能隐私模式）',e); }
+    if(_isCloud) scheduleCloudPut();
   }
+  function scheduleCloudPut(){
+    if(_putTimer) clearTimeout(_putTimer);
+    _putTimer = setTimeout(function(){
+      cloudPut().catch(function(err){
+        console.warn('[云同步] 写入失败：', err && err.message); emitCloudStatus('fail');
+      });
+    }, 400);
+  }
+  async function cloudPut(){
+    if(!_state) return;
+    const cos = _cos;
+    if(!cos) throw new Error('COS 未初始化');
+    const body = JSON.stringify(_state);
+    const params = {
+      Bucket: CLOUD.bucket, Region: CLOUD.region, Key: CLOUD.key||'data.json',
+      Body: body, ContentType: 'application/json', Headers: {}
+    };
+    if(_cloudETag) params.Headers['If-Match'] = _cloudETag;   // 乐观并发：远端没被改才覆盖
+    try{
+      const res = await cos.putObject(params);
+      _cloudETag = (res && res.ETag) || _cloudETag;
+      emitCloudStatus('synced');
+    }catch(e){
+      const code = e && (e.statusCode || (e.error && e.error.Code));
+      if(code === 412 || code === 'AccessDenied'){
+        // 412 = 远端已被其他端改动（乐观锁冲突）→ 拉最新 + 字段合并 + 重试一次
+        try{
+          const remote = await _pullRemote();
+          if(remote){ _state = _merge(_state, remote); save(); }
+          await cos.putObject({ Bucket:CLOUD.bucket, Region:CLOUD.region, Key:CLOUD.key||'data.json',
+            Body: JSON.stringify(_state), ContentType:'application/json', Headers:{} });
+          _cloudETag = null; emitCloudStatus('synced');
+        }catch(e2){ console.warn('[云同步] 冲突合并后写入仍失败', e2 && e2.message); emitCloudStatus('fail'); }
+      } else throw e;
+    }
+  }
+
+  /* 乐观并发冲突时的字段级合并：尽量不丢任意一端的数据
+     - 数组类（goals/notes/diaries/log/adviceLog）按 id 去重并集
+     - tasks 按 日期→id 去重并集
+     - 标量/对象（profile、meta、version）取 lastSync 较新的一方整体 */
+  function _merge(local, remote){
+    const lTs = (local.meta && local.meta.lastSync) || 0;
+    const rTs = (remote.meta && remote.meta.lastSync) || 0;
+    const merged = JSON.parse(JSON.stringify(rTs >= lTs ? remote : local));
+    merged.tasks = merged.tasks || {};
+    ['goals','notes','diaries','log','adviceLog'].forEach(function(k){
+      const base = (rTs >= lTs ? local : remote)[k] || [];
+      const seen = new Set((merged[k]||[]).map(function(x){ return x && x.id; }));
+      base.forEach(function(x){ if(x && x.id && !seen.has(x.id)) merged[k].push(x); });
+    });
+    if(remote.tasks && local.tasks){
+      for(const d in local.tasks){
+        merged.tasks[d] = merged.tasks[d] || [];
+        const rids = new Set(merged.tasks[d].map(function(t){ return t.id; }));
+        local.tasks[d].forEach(function(t){ if(!rids.has(t.id)) merged.tasks[d].push(t); });
+      }
+    }
+    merged.meta.lastSync = Math.max(lTs, rTs);
+    return merged;
+  }
+  function onCloudStatus(cb){ _cloudStatusCb = cb; }
+  function isCloud(){ return _isCloud; }
+
   function reset(){
     _state = buildSeed(); save(); return _state;
   }
@@ -263,7 +422,7 @@
     const now = fmtDate(today());
     const goal = Object.assign({
       id:uid('g'), stageIndex:0, status:'active', createdAt:now, progress:0,
-      totalTasksDone:0, weeklyTasksDone:0, stages:[], color:'#C5B4E3', type:'generic'
+      totalTasksDone:0, weeklyTasksDone:0, stages:[], color:'#C0B8DC', type:'generic'
     }, g);
     _state.goals.push(goal); save(); return goal;
   }
@@ -334,6 +493,7 @@
   window.ZQ = window.ZQ || {};
   window.ZQ.store = {
     load, save, reset, exportJSON, importJSON,
+    init, onCloudStatus, isCloud,
     uid, fmtDate, today, shiftDay, weekdayCN, weekdayShort, weekOf, INBOX, isoWeek, weekKey,
     tasksOf, ensureDate, addTask, updateTask, deleteTask, reorder, setDone, onTaskToggled,
     setTaskDate, unscheduled, pushDragLog, dragOutCount, dragInCount, getWeekFocus, setWeekFocus, setWeekSummary,
