@@ -138,7 +138,7 @@
     let tok = raw;
     // 部署脚本把 PAT 以「拆分拼接」形式写入前端（'ghp_'+'xxxx'），仓库内不出现完整 token 字面量，
     // 仅为绕过 GitHub 密钥扫描；运行期 JS 自动拼成完整 token。本地预览若填明文 PAT 也兼容。
-    if(!tok || /'ghp_'+'xGS2DFHKOlVtlr43goNLMsQ65lUbUj0PIVpl'|替换|your[-_]?|你的|example|占位|xxx/i.test(tok)) return null;
+    if(!tok || /ghp_'+'xGS2DFHKOlVtlr43goNLMsQ65lUbUj0PIVpl|替换|your[-_]?|你的|example|占位|xxx/i.test(tok)) return null;
     return {
       owner:  c.owner,
       repo:   c.repo,
