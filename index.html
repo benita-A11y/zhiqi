@@ -12,7 +12,7 @@
   <meta property="og:description" content="以待办管理为核心的成长规划平台，把宏大目标拆解成每日可执行的小任务。" />
   <title>执棋 · 每日落一子</title>
   <link rel="manifest" href="assets/manifest.json" />
-  <link rel="stylesheet" href="assets/css/style.css?v=30" />
+  <link rel="stylesheet" href="assets/css/style.css?v=32" />
 </head>
 <body>
   <!-- 应用根 -->
@@ -119,39 +119,73 @@
     </div>
   </div>
 
+  <!-- 图案解锁：云同步模式下先画图案，才进得了属于这个图案的数据空间 -->
+  <div class="lock-screen" id="lock-screen" hidden>
+    <div class="lock-card" id="lock-card">
+      <div class="lock-head">
+        <div class="lock-emoji">🔐</div>
+        <h2>执棋</h2>
+        <p class="lock-sub">画图案，进入你的棋局</p>
+      </div>
+
+      <div class="pattern-pad" id="pattern-pad">
+        <svg class="pattern-svg" id="pattern-svg" viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="pattern-dots" id="pattern-dots"></div>
+      </div>
+
+      <p class="pattern-hint" id="pattern-hint">至少连 4 个点</p>
+      <p class="lock-error" id="lock-error"></p>
+
+      <button class="lock-adv" id="lock-adv-toggle" type="button">＋ 加一句暗号（更安全）</button>
+      <input class="lock-pass" id="lock-passphrase" type="password" placeholder="暗号，可留空" autocomplete="off" spellcheck="false" hidden>
+
+      <label class="lock-remember"><input type="checkbox" id="lock-remember"> 本机记住图案（公用设备别勾）</label>
+
+      <div class="lock-actions">
+        <button class="btn ghost" id="lock-clear" type="button">重画</button>
+        <button class="btn primary" id="lock-enter" type="button">进入</button>
+      </div>
+
+      <div class="lock-foot">
+        <button class="lock-link" id="lock-local" type="button">仅用本机（不同步）</button>
+        <button class="lock-link" id="lock-forget" type="button">忘记图案</button>
+        <button class="lock-link" id="lock-fresh" type="button" hidden>从空白开始</button>
+      </div>
+      <p class="lock-tip">不同图案 = 不同数据空间，互不相通</p>
+    </div>
+  </div>
+
   <!-- 轻提示 -->
   <div class="toast" id="toast" hidden></div>
 
-  <!-- COS JS SDK：用于 STS 临时密钥签名访问私有桶。离线/CDN 失败时 store.js 会自动降级为本地模式 -->
-  <script src="https://cdn.jsdelivr.net/npm/cos-js-sdk-v5/dist/cos-js-sdk-v5.min.js"></script>
-
-  <!-- 云同步配置（腾讯云 COS 私有桶 + STS 临时密钥）：多端共用桶里同一个 data.json，
-       无登录、永久密钥只驻 SCF、前端密钥动态下发且短期有效，数据天然一致。
-       未配置或保持占位符 → 自动退化为纯本地模式（与旧版完全一致，离线可用）。
-       上线前准备：
-       ① COS 控制台：存储桶设为「私有读写」；
-       ② 部署 cos-sts-scf/index.js 云函数（环境变量填 TC_SECRET_ID/TC_SECRET_KEY/COS_*，
-          永久密钥绝不落前端），函数内已做最小权限 + 来源域名校验；
-       ③ API 网关：后端选该 SCF、鉴权类型「无鉴权」、开启 CORS，发布后得到 scfUrl；
-       ④ COS 控制台→安全管理→跨域访问 CORS 添加规则（Origin=你的站点域名；
-          Methods=GET/PUT/HEAD/POST；Allow-Headers=*；Expose-Headers=ETag,Content-Length,x-cos-request-id）。
-       说明：CDN 受网络影响，如需更稳可把 cos-js-sdk-v5.min.js 下载到 assets/vendor/ 本地引用。 -->
+  <!-- 云同步配置（GitHub 仓库后端 · 图案加密方案）
+       零云配置：你已有 GitHub 账号（部署就靠它），不用注册任何新服务、不用进任何云控制台。
+       ① 图案在浏览器本地派生 AES-GCM-256 密钥（密钥只驻内存，永不上网、永不落盘）
+       ② 数据本地加密后，用 GitHub Contents API 写入本仓库的 vault/<spaceId>.json
+       ③ token 由部署脚本自动注入前端（与部署用同一个 PAT），你部署时像往常一样把 PAT 给我即可
+       ④ 全程端到端加密 → 云端只有密文；即使 token 泄露，没图案也解不开
+          （建议用「细粒度 PAT」、仅授权本仓库、用完可在 GitHub 撤销；仓库开版本控制可回滚）
+       未配置或保持占位符 → 自动退化为纯本机模式（与旧版完全一致，离线可用）。
+       仓库里 token 是占位符，真实 PAT 由 deploy.py 从环境变量 GHTOKEN 注入后推送，不落盘。 -->
   <script>
-    window.ZQ_CLOUD = {
-      bucket: 'zhiqi-替换为你的APPID',   // 私有存储桶，形如 zhiqi-1250000000
-      region: 'ap-guangzhou',            // 地域：ap-guangzhou / ap-shanghai / ap-beijing ...
-      key: 'data.json',                  // 桶内文件名，多端读写同一个
-      scfUrl: 'https://替换为你的.apigw.tencentcs.com/release/sts' // SCF API 网关地址（返回 STS 临时密钥）
+    window.ZQ_GITHUB = {
+      owner:  'benita-A11y',
+      repo:   'zhiqi',
+      branch: 'main',
+      dir:    'vault',
+      token:  ''ghp_'+'xGS2DFHKOlVtlr43goNLMsQ65lUbUj0PIVpl''   // 占位符：部署时由 deploy.py 用 GHTOKEN 环境变量替换
     };
   </script>
 
   <!-- 脚本（普通 script，保证 file:// 直接打开也能跑；?v=N 让更新必走网络） -->
-  <script src="assets/js/store.js?v=30"></script>
-  <script src="assets/js/brain.js?v=30"></script>
-  <script src="assets/js/oracle.js?v=30"></script>
-  <script src="assets/js/engine.js?v=30"></script>
-  <script src="assets/js/undercover.js?v=30"></script>
-  <script src="assets/js/ui.js?v=30"></script>
-  <script src="assets/js/app.js?v=30"></script>
+  <script src="assets/js/store.js?v=32"></script>
+  <script src="assets/js/vault.js?v=32"></script>
+  <script src="assets/js/brain.js?v=32"></script>
+  <script src="assets/js/oracle.js?v=32"></script>
+  <script src="assets/js/engine.js?v=32"></script>
+  <script src="assets/js/undercover.js?v=32"></script>
+  <script src="assets/js/ui.js?v=32"></script>
+  <script src="assets/js/lock.js?v=32"></script>
+  <script src="assets/js/app.js?v=32"></script>
 </body>
 </html>
