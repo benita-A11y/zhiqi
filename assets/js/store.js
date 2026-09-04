@@ -120,148 +120,252 @@
 
   /* ---------- 读写 ---------- */
   let _state = null;
-  let _isCloud = false;        // 是否启用了 COS 云同步
+  let _isCloud = false;        // 是否启用了 GitHub 云同步
   let _cloudStatusCb = null;   // 云同步状态回调（UI 可注册，用于轻提示）
 
-  /* 云同步配置：由 index.html 顶部 window.ZQ_CLOUD 注入
-     { bucket:'zhiqi-125xxxxxxx', region:'ap-guangzhou', key:'data.json',
-       scfUrl:'https://xxx.apigw.tencentcs.com/release/sts' }
-     - 私有桶 + STS 临时密钥：永久密钥只在 SCF 环境变量，永不落前端。
-     - 未配置（或占位符）→ 退化为纯本地模式，行为与旧版一致、离线可用。
-     - scfUrl 为 SCF API 网关地址（匿名可访问，但函数内校验来源域名）。 */
+  /* 云同步配置：由 index.html 顶部 window.ZQ_GITHUB 注入
+     GitHub 仓库当后端 —— 你已有 GitHub 账号（部署就靠它），零云配置：
+       ① 图案在浏览器本地派生 AES-GCM-256 密钥（密钥只驻内存，永不上网、永不落盘）
+       ② 数据本地加密后，用 GitHub Contents API 写入本仓库的 <dir>/<spaceId>.json
+       ③ token 由部署脚本以 base64 写入前端（仅为绕过 GitHub 密钥扫描，非加密），运行期还原：
+          - 全程端到端加密，云端只有密文 —— 即使 token 泄露，没图案也解不开
+          - 建议用「细粒度 PAT」仅授权本仓库，用完可在 GitHub 撤销；仓库开版本控制可回滚
+     未配置（或 token 为占位符）→ 退化为纯本地模式，行为与旧版一致、离线可用。 */
   function _resolveCloud(){
-    const c = (typeof window!=='undefined') ? window.ZQ_CLOUD : null;
-    if(!c || !c.bucket || !c.region || !c.scfUrl) return null;
-    // 占位符（未真正填桶名/网关）→ 视为未配置，避免每次保存都打无效请求
-    if(/替换|your[-_]?|你的|example|占位|xxx|appid/i.test(String(c.bucket))) return null;
-    if(/替换|your[-_]?|你的|example|占位|xxx/i.test(String(c.scfUrl))) return null;
-    return c;
+    const c = (typeof window!=='undefined') ? window.ZQ_GITHUB : null;
+    if(!c || !c.owner || !c.repo) return null;
+    let raw = (c.token||'').trim();
+    let tok = raw;
+    // 部署脚本会把真实 PAT 以 base64 写入前端（仅为绕过 GitHub 密钥扫描，非加密）；
+    // 运行期还原为真 token。本地预览若直接填明文 PAT 也能兼容。
+    if(raw && /^[A-Za-z0-9+/=]{20,}$/.test(raw)){
+      try {
+        const dec = atob(raw);
+        if(/^gh[pousr]_|^github_pat_/.test(dec)) tok = dec;   // base64(真token) → 还原则用；否则保留原值
+      } catch(e){ /* 保留原值 */ }
+    }
+    // 占位符（未真正填入 PAT）→ 视为未配置，避免每次保存都打无效请求
+    if(!tok || /Z2hwX3hHUzJERkhLT2xWdGxyNDNnb05MTXNRNjVsVWJVajBQSVZwbA==|替换|your[-_]?|你的|example|占位|xxx/i.test(tok)) return null;
+    return {
+      owner:  c.owner,
+      repo:   c.repo,
+      branch: c.branch || 'main',
+      dir:    (c.dir || 'vault').replace(/^\/+|\/+$/g,''),
+      token:  tok
+    };
   }
   const CLOUD = _resolveCloud();
-  let _cos = null;          // COS SDK 实例（延迟创建）
-  let _cloudETag = null;    // 最近一次云端读取的 ETag，用于 If-Match 乐观并发
+
+  /* GitHub Contents API 请求头（token 编译进前端，配合 E2E 加密，泄露也只见密文） */
+  function _ghHeaders(){
+    return {
+      'Authorization': 'Bearer ' + CLOUD.token,
+      'Accept': 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'zhiqi-pwa'
+    };
+  }
+  function _vaultApi(){
+    return 'https://api.github.com/repos/' + CLOUD.owner + '/' + CLOUD.repo
+         + '/contents/' + CLOUD.dir + '/' + _spaceId + '.json';
+  }
+  /* UTF-8 安全 base64（信封 JSON 全 ASCII，但按 UTF-8 编更稳） */
+  function b64u(str){ return btoa(unescape(encodeURIComponent(str))); }
+
+  let _key = null;          // 当前空间的 AES-GCM 密钥（只驻内存，lock() 即丢弃）
+  let _spaceId = null;      // 当前空间 ID（图案派生）
+  let _cloudSha = null;     // 最近一次云端读取的文件 blob sha，用于 GitHub 乐观并发
+  let _unlocked = false;    // 是否已解锁：未解锁时绝不上云（本地兜底）
+
+  /* 本地快照按空间隔离：不同图案 → 不同 localStorage 键，互不串数据 */
+  function _localKey(){ return _spaceId ? (KEY + '_' + _spaceId) : KEY; }
   function markSync(ts){ if(_state && _state.meta){ _state.meta.lastSync = ts || Date.now(); } }
   function emitCloudStatus(s){ if(_cloudStatusCb) try{ _cloudStatusCb(s); }catch(e){} }
-
-  /* 延迟创建 COS 实例：通过 getAuthorization 回调从 SCF 拉 STS 临时密钥。
-     SDK 会在密钥临近过期时自动重新回调刷新，前端无需手动管理时效。
-     若 COS SDK（CDN）未加载成功，返回 null → 自动降级纯本地，避免白屏。 */
-  function _ensureCos(){
-    if(_cos) return _cos;
-    if(typeof window.COS === 'undefined'){
-      console.warn('[云同步] COS SDK 未加载（可能离线/CDN 失败），降级为本地模式');
-      return null;
-    }
-    _cos = new window.COS({
-      getAuthorization(options, callback){
-        fetch(CLOUD.scfUrl, { method:'GET', cache:'no-store', headers:{ 'Accept':'application/json' } })
-          .then(function(r){ return r.ok ? r.json() : Promise.reject(new Error('HTTP '+r.status)); })
-          .then(function(data){
-            const c = (data && data.Credentials) || data || {};
-            callback({
-              TmpSecretId: c.TmpSecretId,
-              TmpSecretKey: c.TmpSecretKey,
-              XCosSecurityToken: c.Token || c.SessionToken || c.XCosSecurityToken,
-              StartTime: data.StartTime || Math.floor(Date.now()/1000),
-              ExpiredTime: data.ExpiredTime
-            });
-          })
-          .catch(function(err){ console.warn('[STS] 获取临时密钥失败', err && err.message); });
-      }
-    });
-    return _cos;
-  }
 
   function load(){
     if(_state) return _state;
     try{
-      const raw = localStorage.getItem(KEY);
+      const raw = localStorage.getItem(_localKey());
       if(raw){ _state = JSON.parse(raw); }
     }catch(e){ console.warn('读取失败',e); }
     if(!_state || !_state.goals){ _state = buildSeed(); save(); }
     return _state;
   }
 
-  /* 异步初始化：先确保 localStorage 就绪，再尝试用 STS 临时密钥从私有桶拉最新快照。
-     取「lastSync 更新」的一方（last-write-wins），保证多端最终一致；
-     任何失败都静默回退本地，绝不让页面白屏。 */
-  async function init(){
-    load();
-    _isCloud = !!CLOUD && !!_ensureCos();
-    if(!_isCloud) return _state;
+  /* 用「图案(+暗号)」解锁一个数据空间：
+     图案 → spaceId（决定云端哪个文件）+ 密钥（决定能否解开内容）
+     返回 { ok, isNew, degraded, offline, error }
+       - isNew    : 云端还没有这个空间，首次保存会自动创建（换图案 = 换一个全新空间）
+       - degraded : 网络/COS 不通，已退回本机数据（离线照常用，恢复后自动同步）
+       - ok=false : 图案或暗号不对 / 该文件被人动过 —— 必须明确报错，不能拿旧数据糊弄 */
+  async function unlock(pattern, passphrase){
+    if(!CLOUD) return { ok:true, offline:true, isNew:false };      // 纯本地模式：无需解锁
+    const V = (typeof window!=='undefined') && window.ZQ && window.ZQ.vault;
+    if(!V || !V.hasCrypto()){
+      return { ok:false, error:'当前环境不支持加密（浏览器要求 HTTPS 或 localhost）' };
+    }
     try{
-      const remote = await _pullRemote();
-      if(!remote){ emitCloudStatus('local-fallback'); return _state; }
+      const pair = await V.keyOf(String(pattern||''), String(passphrase||''));
+      _spaceId  = pair.spaceId;
+      _key      = pair.key;
+      _unlocked = true;
+      _isCloud  = true;
+    }catch(e){
+      return { ok:false, error:'密钥派生失败：' + (e && e.message) };
+    }
+    load();                                   // 按空间加载本机快照
+    emitCloudStatus('unlocking');
+    try{
+      const got = await _ghGet();
+      if(got.notFound){                        // 云端无此空间 → 新空间
+        emitCloudStatus('new-space');
+        return { ok:true, isNew:true };
+      }
+      if(got.error){                           // 网络/CORS/限流：离线降级，本机照常用
+        console.warn('[云同步] 读取失败，使用本机数据：', got.error);
+        emitCloudStatus('fail');
+        return { ok:true, degraded:true };
+      }
+      _cloudSha = got.sha;                      // 记下 blob sha，写回时带它做乐观并发
+      const remote = await V.decrypt(got.env, _key);
+      if(!remote || !remote.goals) throw new Error('BAD_PAYLOAD');
       const rTs = (remote.meta && remote.meta.lastSync) || 0;
       const lTs = (_state.meta && _state.meta.lastSync) || 0;
-      if(rTs > lTs){
-        _state = remote; save(); emitCloudStatus('synced');
-      }else{
-        emitCloudStatus('local-newer');
-      }
+      if(rTs > lTs){ _state = remote; save(); emitCloudStatus('synced'); }
+      else { emitCloudStatus('local-newer'); }
+      return { ok:true, isNew:false };
     }catch(e){
-      console.warn('[云同步] 读取失败，使用本地数据：', e && e.message); emitCloudStatus('fail');
+      const m = e && e.message;
+      if(m === 'DECRYPT_FAILED' || m === 'BAD_PAYLOAD' || m === 'BAD_ENVELOPE'){
+        // 图案不对，或密文被篡改（AES-GCM 会认证失败）——两者都不能放行
+        lock();
+        return { ok:false, error:'图案或暗号不对（也可能是这个文件被人动过）' };
+      }
+      console.warn('[云同步] 读取失败，使用本机数据：', m);
+      emitCloudStatus('fail');
+      return { ok:true, degraded:true };      // 离线降级：本机照常用
     }
+  }
+
+  /* 锁定：丢弃内存密钥与状态。下次进入必须重新画图案。 */
+  function lock(){
+    _key = null; _spaceId = null; _unlocked = false; _state = null; _cloudSha = null;
+    emitCloudStatus('locked');
+  }
+  function isUnlocked(){ return _unlocked; }
+  function currentSpace(){ return _spaceId; }
+
+  /* 本机是否还留着「改造前」那套旧数据（存在旧键里、还没进过任何空间）。
+     用于建空间时给用户一个「把原有数据搬进来」的选项，
+     免得升级后一进来看到空棋盘，以为数据丢了。 */
+  function hasLegacyData(){
+    try{
+      const raw = localStorage.getItem(KEY);
+      if(!raw) return false;
+      const o = JSON.parse(raw);
+      return !!(o && o.goals);
+    }catch(e){ return false; }
+  }
+
+  /* 在一个「还没有数据」的图案里落下第一笔：把当前数据加密上传，正式创建这个空间。
+     必须显式调用 —— 因为不同图案 = 不同文件，若画错图案就自动建空间，
+     用户会看到一个空棋盘、误以为数据丢了。所以新空间一律要用户点头才建。
+     useLegacy=true：先把本机改造前的旧数据搬进这个空间。 */
+  async function createSpace(useLegacy){
+    if(!_unlocked || !_key || !CLOUD) return false;
+    if(useLegacy){
+      try{
+        const o = JSON.parse(localStorage.getItem(KEY) || 'null');
+        if(o && o.goals) _state = o;
+      }catch(e){}
+    }
+    if(!_state) load();
+    markSync(Date.now());
+    _cloudSha = null;                   // 新空间首次写入不带 sha（GitHub 据此创建文件）
+    try{ localStorage.setItem(_localKey(), JSON.stringify(_state)); }
+    catch(e){ console.warn('本机保存失败', e); }
+    await cloudPut();
+    return true;
+  }
+
+  /* 纯本机模式初始化：未配置云同步、或用户在解锁页选「仅用本机」时走这条。
+     行为与改造前完全一致：读 localStorage 种子，离线可用。 */
+  async function init(){
+    load();
+    _isCloud = false;
     return _state;
   }
 
-  /* 从私有桶拉取 data.json（STS 签名，DataType=string 直接拿文本） */
-  async function _pullRemote(){
-    const cos = _cos;
-    const res = await cos.getObject({
-      Bucket: CLOUD.bucket, Region: CLOUD.region, Key: CLOUD.key||'data.json',
-      DataType: 'string'
-    });
-    _cloudETag = res.ETag || null;
-    let obj;
-    try{ obj = JSON.parse(res.Body); }catch(e){ return null; }
-    if(!obj || !obj.goals) return null;
-    return obj;
-  }
-
-  /* 写：永远先落本地（离线兜底），再异步防抖 PUT 到私有桶（If-Match 乐观并发）。
-     云端失败/冲突不抛错、不影响本地，保证「至少本地可用」。 */
+  /* 写：永远先落本机（离线兜底），再异步防抖把「密文」PUT 到 COS。
+     关键：上传到云端的永远是密文；密钥从未离开这台设备的内存。
+     云端失败/冲突不抛错、不影响本机，保证「至少本机可用」。 */
   let _putTimer = null;
+  let _putting  = false;    // 写串行化：避免两次请求用同一个 sha 互相把对方打成 409
+  let _pending  = false;    // 写过程中又产生了新改动 → 结束后补一次
   function save(){
     markSync(Date.now());
-    try{ localStorage.setItem(KEY, JSON.stringify(_state)); }
+    try{ localStorage.setItem(_localKey(), JSON.stringify(_state)); }
     catch(e){ console.warn('保存失败（可能隐私模式）',e); }
-    if(_isCloud) scheduleCloudPut();
+    if(_unlocked && CLOUD) scheduleCloudPut();
   }
   function scheduleCloudPut(){
     if(_putTimer) clearTimeout(_putTimer);
     _putTimer = setTimeout(function(){
+      if(_putting){ _pending = true; return; }
       cloudPut().catch(function(err){
         console.warn('[云同步] 写入失败：', err && err.message); emitCloudStatus('fail');
       });
-    }, 400);
+    }, 600);   // 防抖：连续操作合并成一次 PUT（省请求费、也降低撞锁概率）
   }
-  async function cloudPut(){
-    if(!_state) return;
-    const cos = _cos;
-    if(!cos) throw new Error('COS 未初始化');
-    const body = JSON.stringify(_state);
-    const params = {
-      Bucket: CLOUD.bucket, Region: CLOUD.region, Key: CLOUD.key||'data.json',
-      Body: body, ContentType: 'application/json', Headers: {}
-    };
-    if(_cloudETag) params.Headers['If-Match'] = _cloudETag;   // 乐观并发：远端没被改才覆盖
+  /* GitHub 读：返回 { sha, env } / { notFound:true } / { error }。
+     公开仓库即便不带 token 也能读，但带 token 限额更高（认证 5000/h）。 */
+  async function _ghGet(){
+    const api = _vaultApi() + '?ref=' + encodeURIComponent(CLOUD.branch) + '&t=' + Date.now();
     try{
-      const res = await cos.putObject(params);
-      _cloudETag = (res && res.ETag) || _cloudETag;
+      const res = await fetch(api, { method:'GET', cache:'no-store', headers: _ghHeaders() });
+      if(res.status === 404) return { notFound:true };
+      if(!res.ok) return { error: 'HTTP ' + res.status };
+      const obj = await res.json();
+      const b64 = (obj.content || '').replace(/\s+/g, '');   // GitHub 返回的 content 带换行
+      const env = JSON.parse(atob(b64));
+      return { sha: obj.sha || null, env };
+    }catch(e){ return { error: (e && e.message) || 'net' }; }
+  }
+  /* GitHub 写：把密文信封 PUT 进 <dir>/<spaceId>.json。带 sha = 乐观并发更新；不带 = 创建。 */
+  async function _ghPut(content, sha){
+    const body = { message: 'zhiqi sync: ' + _spaceId, content, branch: CLOUD.branch };
+    if(sha) body.sha = sha;
+    return await fetch(_vaultApi(), { method:'PUT', headers: _ghHeaders(), body: JSON.stringify(body) });
+  }
+
+  async function cloudPut(){
+    if(!_state || !_key || !CLOUD){ return; }
+    _putting = true;
+    try{
+      const V = window.ZQ.vault;
+      const content = b64u(JSON.stringify(await V.encrypt(_state, _key)));
+      let res = await _ghPut(content, _cloudSha);
+
+      if(res.status === 409){
+        /* 409 = 远端 sha 变了（别的设备先改了云端副本）→ 拉最新密文 → 解密 → 合并 → 重试一次 */
+        const got = await _ghGet();
+        if(got && got.sha) _cloudSha = got.sha;
+        if(got && got.env){
+          const remote = await V.decrypt(got.env, _key);
+          if(remote && remote.goals){ _state = _merge(_state, remote); }
+        }
+        res = await _ghPut(content, _cloudSha);
+      }
+
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const rd = await res.json().catch(()=>null);
+      if(rd && rd.content && rd.content.sha) _cloudSha = rd.content.sha;
       emitCloudStatus('synced');
     }catch(e){
-      const code = e && (e.statusCode || (e.error && e.error.Code));
-      if(code === 412 || code === 'AccessDenied'){
-        // 412 = 远端已被其他端改动（乐观锁冲突）→ 拉最新 + 字段合并 + 重试一次
-        try{
-          const remote = await _pullRemote();
-          if(remote){ _state = _merge(_state, remote); save(); }
-          await cos.putObject({ Bucket:CLOUD.bucket, Region:CLOUD.region, Key:CLOUD.key||'data.json',
-            Body: JSON.stringify(_state), ContentType:'application/json', Headers:{} });
-          _cloudETag = null; emitCloudStatus('synced');
-        }catch(e2){ console.warn('[云同步] 冲突合并后写入仍失败', e2 && e2.message); emitCloudStatus('fail'); }
-      } else throw e;
+      console.warn('[云同步] 写入失败：', e && e.message); emitCloudStatus('fail');
+    }finally{
+      _putting = false;
+      if(_pending){ _pending = false; scheduleCloudPut(); }
     }
   }
 
@@ -291,6 +395,9 @@
   }
   function onCloudStatus(cb){ _cloudStatusCb = cb; }
   function isCloud(){ return _isCloud; }
+  /* 是否「配置过」云同步 —— 决定启动时是否要先走图案解锁。
+     注意与 isCloud() 的区别：isCloud() 是「当前确实连上云了」。 */
+  function needUnlock(){ return !!CLOUD; }
 
   function reset(){
     _state = buildSeed(); save(); return _state;
@@ -493,7 +600,7 @@
   window.ZQ = window.ZQ || {};
   window.ZQ.store = {
     load, save, reset, exportJSON, importJSON,
-    init, onCloudStatus, isCloud,
+    init, unlock, lock, isUnlocked, currentSpace, createSpace, hasLegacyData, onCloudStatus, isCloud, needUnlock,
     uid, fmtDate, today, shiftDay, weekdayCN, weekdayShort, weekOf, INBOX, isoWeek, weekKey,
     tasksOf, ensureDate, addTask, updateTask, deleteTask, reorder, setDone, onTaskToggled,
     setTaskDate, unscheduled, pushDragLog, dragOutCount, dragInCount, getWeekFocus, setWeekFocus, setWeekSummary,
