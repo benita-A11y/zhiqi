@@ -115,20 +115,33 @@
     const body=$('#more-body'); if(!body || body.dataset.built) return;
     const sec=NAV_SECONDARY.map(x=>moreItemHTML(x)).join('');
     const ter=NAV_TERTIARY.map(x=>moreItemHTML(x)).join('');
+    const spaceSec = S.needUnlock() ? `
+      <div class="more-sec">
+        <div class="more-sec-title muted">数据空间</div>
+        <button class="more-item" data-action="lock"><span class="mi">🔐</span><span class="ml">锁定 / 换一个图案</span></button>
+      </div>` : '';
     body.innerHTML=`
       <div class="more-sec">
         <div class="more-sec-title">常用</div>${sec}
       </div>
       <div class="more-sec">
         <div class="more-sec-title muted">工具箱</div>${ter}
-      </div>`;
+      </div>${spaceSec}`;
     body.dataset.built='1';
     body.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{ UI.navigate(b.dataset.view); closeMore(); }));
     body.querySelectorAll('[data-action]').forEach(b=>b.addEventListener('click',()=>{
       closeMore();
       if(b.dataset.action==='backup') openBackup();
       else if(b.dataset.action==='about') openAbout();
+      else if(b.dataset.action==='lock') relock();
     }));
+  }
+  /* 锁定 / 换图案：丢掉内存里的密钥，回到解锁页。
+     换一个图案 = 进入另一个数据空间（不同图案对应不同文件，互不相通）。
+     这里用 reload 而不是原地重渲染，避免事件被重复绑定。 */
+  function relock(){
+    S.lock();
+    location.reload();
   }
   function bindMore(){
     buildTabbar();
@@ -236,10 +249,8 @@
     }
   }
 
-  async function init(){
-    window.ZQ.__VER='v26';
-    S.onCloudStatus(function(s){ if(s==='fail') UI.toast('云端同步失败，已用本地'); });
-    await S.init();   // 从 COS 拉取最新快照（若有），否则用本地 localStorage
+  /* 解锁之后才做的初始化：渲染界面、绑定交互、注册 Service Worker */
+  async function boot(){
     U.init();
     U.checkDateTransition();
     E.maybeWeeklyBigshot();
@@ -261,7 +272,7 @@
     // PWA：仅在 http/https 下注册，file:// 直接打开同样可用
     if('serviceWorker' in navigator && location.protocol.indexOf('http')===0){
       // 注册 URL 带版本号：每次部署版本号变化，浏览器无法命中旧缓存，实现「打开即更新」
-      navigator.serviceWorker.register('sw.js?v=30').catch(()=>{});
+      navigator.serviceWorker.register('sw.js?v=32').catch(()=>{});
       // 新版本 Service Worker 接管后，自动刷新一次页面，让用户立即看到新内容
       // 若首屏仍在加载，等 load 完成再刷新，避免「先白屏硬刷」的卡顿感
       let _reloaded=false;
@@ -271,6 +282,22 @@
         else window.addEventListener('load', ()=>window.location.reload(), {once:true});
       });
     }
+  }
+
+  /* 启动分流：
+     - 配了云同步 → 先弹图案解锁，图案决定进哪个数据空间，解锁成功才 boot()
+     - 没配云同步 / 用户在解锁页点了「仅用本机」→ 直接走本地模式 */
+  async function init(){
+    window.ZQ.__VER='v30';
+    S.onCloudStatus(function(s){
+      if(s==='fail') UI.toast('云端同步失败，已用本机数据');
+    });
+    if(S.needUnlock() && !S.isUnlocked() && window.ZQ && window.ZQ.lock){
+      window.ZQ.lock.show(async function(){ await boot(); });
+      return;
+    }
+    await S.init();
+    await boot();
   }
 
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init);
