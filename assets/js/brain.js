@@ -241,8 +241,38 @@
     return { level:'keep', rate7:s7.rate, delta:0, note:'强度刚好。不多不少，稳着走。' };
   }
 
-  /* 情境向量：一次算全，供规则矩阵与分析使用 */
+  /* ---- context 记忆化包装（性能）----
+     context() 是全模块最贵的函数：内部约 12 次全量遍历 st.tasks
+     （completionStats×3 / timeSlotStats / categoryStats / emotionTrend /
+      procrastinationIndex / dropOffRisk / difficultySuggest / allGoalHealth…）。
+     而首屏一次渲染会间接触发 8~12 次（command + 4 个 oracle 分析 + nextBestAction
+     + predict→predictionsV2…），数据量上来后明显卡顿。
+     这里按「日期 + 小时 + 数据指纹」缓存：数据没变就整份复用，
+     跨整点（时段问候要变）或数据一改（勾任务/加任务）自动重算。
+     指纹本身只做一次线性扫描，相对 12 次带日期运算的全表扫描几乎免费。 */
+  let _ctxMemo = { key:null, val:null };
+  function _dataFingerprint(){
+    const st = S.load();
+    let total = 0, done = 0;
+    for(const d in st.tasks){
+      const a = st.tasks[d];
+      if(!Array.isArray(a)) continue;
+      total += a.length;
+      for(let i=0;i<a.length;i++) if(a[i].done) done++;
+    }
+    return [st.goals.length, total, done, (st.notes||[]).length,
+            (st.log||[]).length, ((st.undercover||{}).streak)||0].join('|');
+  }
   function context(dateStr){
+    const ds = dateStr || S.fmtDate(S.today());
+    const key = ds + '#' + new Date().getHours() + '#' + _dataFingerprint();
+    if(_ctxMemo.key === key) return _ctxMemo.val;
+    _ctxMemo.val = _contextCompute(ds);
+    _ctxMemo.key = key;
+    return _ctxMemo.val;
+  }
+  /* 真正的计算体（被上面的包装调用） */
+  function _contextCompute(dateStr){
     const st = S.load();
     dateStr = dateStr || S.fmtDate(S.today());
     const d = new Date(dateStr + 'T00:00:00');
