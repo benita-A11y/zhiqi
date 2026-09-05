@@ -14,7 +14,14 @@
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
   const TYPE_LABEL = {fragment:'⏳ 碎片任务',evening:'📖 晚间任务',byway:'🚶 顺路任务',habit:'🌙 习惯养成'};
   const TYPE_ICON = {fragment:'⏳',evening:'📖',byway:'🚶',habit:'🌙'};
-  function typeTag(t){ return `<span class="tag t-${t}">${TYPE_ICON[t]||'•'} ${TYPE_LABEL[t].split(' ')[0]}</span>`; }
+  /* 未知类型兜底：导入旧备份 / 未来新增任务类型时，TYPE_LABEL[t] 会是 undefined，
+     原来的 `TYPE_LABEL[t].split(' ')` 直接抛 TypeError 整页白屏。
+     这里回落到「碎片任务」，保证任何数据都能渲染出来。 */
+  function typeTag(t){
+    const label = TYPE_LABEL[t] || TYPE_LABEL.fragment;
+    const icon  = TYPE_ICON[t]  || '⏳';
+    return `<span class="tag t-${t}">${icon} ${label.split(' ')[0]}</span>`;
+  }
   function goalTag(goalId){
     if(!goalId) return '';
     const g=S.getGoal(goalId); if(!g) return '';
@@ -221,7 +228,7 @@
     shown.forEach(t=>{
       if(t.type!==lastType){
         const cnt=tasks.filter(x=>x.type===t.type).length;
-        html += `<div class="group-label"><span class="bar"></span>${TYPE_LABEL[t.type]}<span class="cnt">${cnt}项</span></div>`;
+        html += `<div class="group-label"><span class="bar"></span>${TYPE_LABEL[t.type]||TYPE_LABEL.fragment}<span class="cnt">${cnt}项</span></div>`;
         lastType=t.type;
       }
       const g = t.goalId?S.getGoal(t.goalId):null;
@@ -331,7 +338,7 @@
         <label class="route-opt">
           <input type="checkbox" checked data-idx="${i}">
           <span class="ro-title">${esc(r.title)}${r.score?`<b class="ro-score" title="顺路度">${r.score}</b>`:''}</span>
-          <span class="ro-meta">${r.duration}′ · ${TYPE_LABEL[r.type].split(' ')[0]}${r.goalId&&S.getGoal(r.goalId)?' · '+esc(S.getGoal(r.goalId).title):''}</span>
+          <span class="ro-meta">${r.duration}′ · ${(TYPE_LABEL[r.type]||TYPE_LABEL.fragment).split(' ')[0]}${r.goalId&&S.getGoal(r.goalId)?' · '+esc(S.getGoal(r.goalId).title):''}</span>
           ${r.reason?`<span class="ro-reason">${esc(r.reason)}</span>`:''}
         </label>`).join('');
       modal('🚶 顺路任务推荐：'+esc(place),`
@@ -432,7 +439,7 @@
     let goalsHtml = st.goals.map(g=>{
       const plan=E.weeklyPlanFor(g);
       const weekRows=[1,2,3,4,5,6,0].map(wd=>{
-        const items=(plan[wd]||[]).map(s=>`<div class="wt">${esc(s.title)} <span class="wd">${s.duration}′·${TYPE_LABEL[s.type].split(' ')[0]}</span></div>`).join('<br>');
+        const items=(plan[wd]||[]).map(s=>`<div class="wt">${esc(s.title)} <span class="wd">${s.duration}′·${(TYPE_LABEL[s.type]||TYPE_LABEL.fragment).split(' ')[0]}</span></div>`).join('<br>');
         return `<tr><td>${S.weekdayCN[wd]}</td><td>${items||'<span class="wd">休息/轻量</span>'}</td></tr>`;
       }).join('');
       const stagePills=g.stages.map((s,i)=>`<span class="stage-pill ${i<g.stageIndex?'done':i===g.stageIndex?'active':''}">${esc(s.name)}</span>`).join('');
