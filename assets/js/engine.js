@@ -424,10 +424,37 @@
     let msg = '';
     try{ const b = B.command(dateStr); if(b && b.msg) msg = takeSentences(b.msg, 2); }catch(e){ msg = ''; }
 
+    // ①·b 深度大脑（mind.js）：人格引擎 + 落子规划
+    //    brain 负责「发生了什么」，mind 负责「这一子该怎么落、用什么口气说」。
+    //    全部包 try/catch：军师算不出来，也不能让今日指令开天窗。
+    let mindBrief = null, mindMove = '', mindMetrics = null;
+    try{
+      const M = window.ZQ && window.ZQ.mind;
+      if(M){
+        mindBrief   = M.brief(dateStr);
+        mindMove    = M.moveLine(dateStr);
+        mindMetrics = (mindBrief && mindBrief.metrics) || null;
+      }
+    }catch(e){ mindBrief = null; mindMove = ''; mindMetrics = null; }
+
     // ② 领域层：brain 决定"何时说"，这里补"怎么打"——针对主目标阶段的实战建议
     const active = st.goals.filter(g=>g.status==='active');
     const lines = [];
-    const focus = active[0];
+    // 深度大脑的话排在最前：它已综合了倦怠 / 过度承诺 / 选择困难 / 动量 / 平台期等全部指标，
+    // 是最该先说的那一句（后面还有句数上限，排到最后会被裁掉）
+    if(mindBrief && mindBrief.line) lines.push(mindBrief.line);
+    if(mindMove) lines.push(mindMove);
+
+    // 焦点目标：与 brain.command 的口径对齐 —— 取「最掉队」的那个，而不是列表第一个。
+    // 旧实现直接用 active[0]，会出现「军师嘴里说的是 A 目标，领域打法却在讲 B 目标」的错位。
+    let focus = active[0];
+    try{
+      const hs = (B && B.allGoalHealth) ? B.allGoalHealth() : [];
+      const RANK = { danger:0, behind:1, ontrack:2, ahead:3, done:4 };
+      const sorted = hs.filter(h=>h && h.state!=='done')
+        .sort((a,b)=> (RANK[a.state]!=null?RANK[a.state]:9) - (RANK[b.state]!=null?RANK[b.state]:9));
+      if(sorted.length && sorted[0].goal) focus = sorted[0].goal;
+    }catch(e){ /* 异常时保持 active[0]，不影响主流程 */ }
     if(focus){
       const stage = focus.stages[focus.stageIndex];
       const tip = (FOCUS_TIP[focus.type] && FOCUS_TIP[focus.type][stage.name]) || '';
@@ -456,9 +483,12 @@
 
     if(lines.length) msg += (msg? ' ' : '') + lines.join(' ');
     if(!msg) msg = '今天先落一子，后面我替你安排。';
-    // 最终控制在 4 句以内：一条指令说太多，等于什么都没说
-    msg = takeSentences(msg, 4);
-    return { who:'摆渡人指令', msg, energy, load, streak, forecast, next };
+    // 最终控制在 5 句以内：一条指令说太多，等于什么都没说。
+    // （由 4 句放宽到 5 句，是因为接入了深度大脑的「人格判断 + 落子顺序」——
+    //   这两句回答的是「我现在该先做哪个」，信息密度最高，值得占位置。）
+    msg = takeSentences(msg, 5);
+    return { who:'摆渡人指令', msg, energy, load, streak, forecast, next,
+             mind: mindBrief, move: mindMove, metrics: mindMetrics };
   }
 
   /* =========================================================
@@ -964,7 +994,20 @@
     const st=S.load();
     const todayStr=S.fmtDate(S.today());
     if(!st.predictShown) st.predictShown={};
-    predict().forEach(p=>{
+    let list=[];
+    try{ list = predict() || []; }catch(e){ list = []; }
+    // 深度大脑的处境判断并入推送（倦怠 / 过度承诺 / 选择困难 / 平台期 / 动量 / 恢复需求 …）
+    // 用独立 id 前缀 mind_，与原有规则各自的「当日只推一次」互不干扰。
+    try{
+      const M = window.ZQ && window.ZQ.mind;
+      if(M){
+        (M.scan(todayStr, 2) || []).forEach(h=>{
+          if(h && h.id && h.text) list.push({ id:('mind_'+h.id), text:h.text, pri:h.pri });
+        });
+      }
+    }catch(e){ /* 深度大脑缺席也不影响原有预判推送 */ }
+    (list||[]).forEach(p=>{
+      if(!p || !p.id || !p.text) return;
       if(st.predictShown[p.id]===todayStr) return;
       st.predictShown[p.id]=todayStr;
       S.pushLog('军师', p.text, 'predict');
