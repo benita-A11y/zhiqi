@@ -272,7 +272,7 @@
     // PWA：仅在 http/https 下注册，file:// 直接打开同样可用
     if('serviceWorker' in navigator && location.protocol.indexOf('http')===0){
       // 注册 URL 带版本号：每次部署版本号变化，浏览器无法命中旧缓存，实现「打开即更新」
-      navigator.serviceWorker.register('sw.js?v=36').catch(()=>{});
+      navigator.serviceWorker.register('sw.js?v=37').catch(()=>{});
       // 新版本 Service Worker 接管后，自动刷新一次页面，让用户立即看到新内容
       // 若首屏仍在加载，等 load 完成再刷新，避免「先白屏硬刷」的卡顿感
       let _reloaded=false;
@@ -288,7 +288,7 @@
      - 配了云同步 → 先弹图案解锁，图案决定进哪个数据空间，解锁成功才 boot()
      - 没配云同步 / 用户在解锁页点了「仅用本机」→ 直接走本地模式 */
   async function init(){
-    window.ZQ.__VER='v36';
+    window.ZQ.__VER='v37';
     S.onCloudStatus(function(s){
       if(s==='fail') UI.toast('云端同步失败，已用本机数据');
     });
