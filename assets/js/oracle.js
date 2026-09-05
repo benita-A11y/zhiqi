@@ -529,7 +529,10 @@
       const reasons = [];
       if(goalName) reasons.push('推进「' + goalName + '」');
       if(h) reasons.push('这类事你过去完成率 ' + pctN(h.rate) + '%');
-      if(c.source==='inbox') reasons.push('你的待安排清单里已有');
+      // 候选的 source 只有 'lib' | 'route-inbox' | 'history'（见上面候选池构造），
+      // 原来这里写的是 'inbox'，永远不成立，导致「你的待安排清单里已有」这句推荐理由
+      // 从来没显示过。改为 'route-inbox' 才对得上 INBOX 里收进来的候选。
+      if(c.source==='route-inbox' || c.source==='inbox') reasons.push('你的待安排清单里已有');
       if(c.source==='history') reasons.push('你在这个地方常做');
       if(c.duration<=15) reasons.push(c.duration + ' 分钟可搞定');
       return { ...c, score, goalName, goalId, reason: reasons.join(' · ') };
@@ -1229,9 +1232,15 @@
     const extra = fireExtra(10);
     const seen = {};
     const out = [];
-    base.forEach(h=>{ if(!seen[h.id]){ seen[h.id]=1; out.push({ id:h.id, text:h.text, pri:70, src:'base' }); } });
+    // 修复（原缺陷 B3）：brain 的 fireRules 本就按 pri 降序返回，但 B.predictions()
+    // 只带出 id / text，原来这里统一赋 pri:70 —— 结果「断档风险(100)」和「时段提示(20)」
+    // 变成同级，扩展规则几乎总是压过基础规则，最该先说的预警反而被挤到后面。
+    // 现在按下标还原优先级：越靠前分越高（95 起，每项 -7，下限 35）。
+    base.forEach((h, idx)=>{ if(!seen[h.id]){ seen[h.id]=1;
+      out.push({ id:h.id, text:h.text,
+                 pri: (typeof h.pri === 'number') ? h.pri : Math.max(35, 95 - idx*7), src:'base' }); } });
     extra.forEach(h=>{ if(!seen[h.id]){ seen[h.id]=1; out.push({ id:h.id, text:h.text, pri:h.pri, src:'x' }); } });
-    // base 无优先级，统一给 70；扩展规则自带优先级，高的排前面
+    // 基础规则按下标还原优先级；扩展规则自带优先级 —— 高的排前面
     out.sort((a,b)=> b.pri - a.pri);
     return out.slice(0, limit);
   }
