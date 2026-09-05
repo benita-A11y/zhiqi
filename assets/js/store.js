@@ -398,10 +398,83 @@
   function exportJSON(){
     return JSON.stringify(_state,null,2);
   }
+  /* ---------- 导入安全：schema 校验 + 字段净化 ----------
+     为什么必须有这道闸：备份 JSON 是完全由用户（或他人）控制的输入，而界面上
+     目标颜色会直接拼进 style 属性 —— ui.js 多处 `style="background:${g.color}"`。
+     若备份里的 color 写成 `red" onmouseover="alert(1)` 这类值，就能闭合属性注入脚本。
+     所以导入必须做两件事：① 校验整体形状，缺字段用种子补齐，避免渲染时 TypeError 白屏
+                        ② 颜色强制只能是合法十六进制色值，文本截断，数值夹到合理区间。 */
+  function safeHex(c, fallback){
+    if(typeof c !== 'string') return fallback;
+    const s = c.trim();
+    // 只放行 #RGB / #RRGGBB / #RRGGBBAA，其它一律退回默认色
+    return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(s) ? s : fallback;
+  }
+  function safeText(v, max){
+    if(v == null) return '';
+    const s = String(v);
+    return s.length > max ? s.slice(0, max) : s;
+  }
+  function safeInt(v, min, max, dft){
+    const n = parseInt(v, 10);
+    if(isNaN(n)) return dft;
+    return Math.max(min, Math.min(max, n));
+  }
+  function normalizeState(obj){
+    if(!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('数据格式不正确');
+    if(!Array.isArray(obj.goals)) throw new Error('数据格式不正确：缺少 goals');
+    const seed = buildSeed();
+    const st = Object.assign({}, seed, obj);
+
+    // goals：补默认值 + 净化颜色（颜色是唯一会进 style 属性的字段，必须严格）
+    st.goals = obj.goals.filter(g => g && typeof g === 'object').slice(0, 200).map(g => {
+      g.title      = safeText(g.title, 80) || '未命名目标';
+      g.color      = safeHex(g.color, '#B8A9D9');
+      g.category   = safeText(g.category, 30);
+      g.dailyTime  = safeInt(g.dailyTime, 1, 1440, 30);
+      if(!Array.isArray(g.stages) || !g.stages.length){
+        g.stages = [{ name:'起步', weeks:4, core:'打基础' }];
+      }
+      g.stageIndex = safeInt(g.stageIndex, 0, Math.max(0, g.stages.length - 1), 0);
+      g.status     = (g.status === 'done') ? 'done' : 'active';
+      return g;
+    });
+
+    // tasks：必须是 { 'YYYY-MM-DD': [task...] } 形状；INBOX 键一并保留
+    const clean = {};
+    const src = (obj.tasks && typeof obj.tasks === 'object' && !Array.isArray(obj.tasks)) ? obj.tasks : (seed.tasks || {});
+    Object.keys(src).slice(0, 5000).forEach(k => {
+      if(!Array.isArray(src[k])) return;
+      clean[k] = src[k].filter(t => t && typeof t === 'object').slice(0, 200).map(t => {
+        t.title    = safeText(t.title, 120) || '未命名任务';
+        t.done     = !!t.done;
+        t.type     = safeText(t.type, 20) || 'fragment';
+        t.duration = safeInt(t.duration, 1, 1440, 15);
+        t.location = safeText(t.location, 60);
+        t.note     = safeText(t.note, 500);
+        return t;
+      });
+    });
+    st.tasks = clean;
+
+    // 其余数组 / 对象字段兜底：宁可给空容器，也不要 undefined 导致渲染崩溃
+    ['notes','diaries','log','adviceLog'].forEach(k => { if(!Array.isArray(st[k])) st[k] = []; });
+    if(st.log.length > 500)       st.log = st.log.slice(0, 500);
+    if(st.notes.length > 2000)    st.notes = st.notes.slice(0, 2000);
+    if(st.adviceLog.length > 200) st.adviceLog = st.adviceLog.slice(0, 200);
+    if(!st.undercover || typeof st.undercover !== 'object') st.undercover = seed.undercover;
+    if(!st.profile   || typeof st.profile   !== 'object') st.profile    = seed.profile;
+    if(!st.meta      || typeof st.meta      !== 'object') st.meta       = seed.meta;
+    if(!st.weekFocus || typeof st.weekFocus !== 'object') st.weekFocus  = {};
+    if(!st.predictShown || typeof st.predictShown !== 'object') st.predictShown = {};
+    st.version = 1;
+    return st;
+  }
   function importJSON(str){
-    const obj = JSON.parse(str);
-    if(!obj.goals) throw new Error('数据格式不正确');
-    _state = obj; save(); return _state;
+    let obj;
+    try{ obj = JSON.parse(str); }
+    catch(e){ throw new Error('不是有效的 JSON 文件'); }
+    _state = normalizeState(obj); save(); return _state;
   }
 
   /* ---------- 任务 ---------- */
@@ -415,22 +488,27 @@
     }, t);
     arr.push(task); save(); return task;
   }
+  /* 以下三个函数曾经直接遍历 _state，若 _state 尚未初始化（首次进入、或解锁重建后）
+     就会抛 TypeError 整页白屏。统一先 load() 拿到确定存在的 state（与 pushAdvice 同坑）。 */
   function updateTask(id, patch){
-    for(const d in _state.tasks){
-      const i = _state.tasks[d].findIndex(t=>t.id===id);
-      if(i>=0){ Object.assign(_state.tasks[d][i], patch); save(); return _state.tasks[d][i]; }
+    const st = load();
+    for(const d in st.tasks){
+      const i = st.tasks[d].findIndex(t=>t.id===id);
+      if(i>=0){ Object.assign(st.tasks[d][i], patch); save(); return st.tasks[d][i]; }
     }
     return null;
   }
   function deleteTask(id){
-    for(const d in _state.tasks){
-      const i = _state.tasks[d].findIndex(t=>t.id===id);
-      if(i>=0){ _state.tasks[d].splice(i,1); save(); return true; }
+    const st = load();
+    for(const d in st.tasks){
+      const i = st.tasks[d].findIndex(t=>t.id===id);
+      if(i>=0){ st.tasks[d].splice(i,1); save(); return true; }
     }
     return false;
   }
   function reorder(dateStr, orderedIds){
-    const arr = _state.tasks[dateStr]; if(!arr) return;
+    const st = load();
+    const arr = st.tasks[dateStr]; if(!arr) return;
     orderedIds.forEach((id,idx)=>{ const t=arr.find(x=>x.id===id); if(t) t.order=idx; });
     arr.sort((a,b)=>a.order-b.order); save();
   }
