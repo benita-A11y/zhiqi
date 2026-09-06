@@ -118,10 +118,25 @@
     };
   }
 
+  /* 目标进度（与 engine.js 周报展示口径一致：阶段进度）：
+     - 已完成 → 100%
+     - 否则 → 当前阶段 / 总阶段数（stageIndex 已夹在 [0, stages.length-1]）
+     之前 goal.progress 只在创建时写 0、此后永不更新，导致 brain.js 的 goalHealth
+     永远拿到 0 → 所有目标恒判「掉队 / behind」。这里统一由阶段推导，
+     既修了「恒 0」的 bug，也保证大脑与周报两处进度一致。 */
+  function goalProgressOf(g){
+    if(!g) return 0;
+    if(g.status === 'done') return 100;
+    const n = (g.stages && g.stages.length) || 1;
+    const idx = Math.min(Math.max(g.stageIndex|0, 0), n - 1);
+    return Math.round(idx / n * 100);
+  }
+
   /* ---------- 读写 ---------- */
   let _state = null;
   let _isCloud = false;        // 是否启用了 GitHub 云同步
   let _cloudStatusCb = null;   // 云同步状态回调（UI 可注册，用于轻提示）
+  let _saveErrorCb = null;     // 本机保存失败回调（配额已满 / 隐私模式等，UI 用它弹用户可见提示）
 
   /* 云同步配置：由 index.html 顶部 window.ZQ_GITHUB 注入
      GitHub 仓库当后端 —— 你已有 GitHub 账号（部署就靠它），零云配置：
@@ -175,6 +190,12 @@
   function markSync(ts){ if(_state && _state.meta){ _state.meta.lastSync = ts || Date.now(); } }
   function emitCloudStatus(s){ if(_cloudStatusCb) try{ _cloudStatusCb(s); }catch(e){} }
 
+  /* 本机保存失败（localStorage 配额耗尽 / 隐私模式禁用存储等）：
+     曾经这里只 console.warn，用户在毫无察觉的情况下继续操作，新改动其实没落盘 —— 静默丢数据。
+     现在统一抛给 UI，用 toast 给用户一个温和但明确的提醒，至少知道「这次改动可能没保存」。 */
+  function onSaveError(fn){ _saveErrorCb = fn; }
+  function emitSaveError(msg){ if(_saveErrorCb) try{ _saveErrorCb(msg); }catch(e){} }
+
   function load(){
     if(_state) return _state;
     try{
@@ -224,7 +245,25 @@
       if(!remote || !remote.goals) throw new Error('BAD_PAYLOAD');
       const rTs = (remote.meta && remote.meta.lastSync) || 0;
       const lTs = (_state.meta && _state.meta.lastSync) || 0;
-      if(rTs > lTs){ _state = remote; save(); emitCloudStatus('synced'); }
+      if(rTs > lTs){
+        /* 云端数据同样是【不可信输入】：拿到 token 的人可以改仓库里那个密文容器，
+           旧版本也可能写入过结构不完整的数据。必须过一遍 normalizeState：
+           既补齐字段防止白屏，也顺手净化颜色这类会拼进 HTML 属性的值
+           （否则导入端做的 safeHex 净化对云端数据完全失效）。 */
+        let safeRemote = null;
+        try{ safeRemote = normalizeState(remote); }catch(e){ safeRemote = null; }
+        if(safeRemote){
+          const keepTs = (remote.meta && remote.meta.lastSync) || 0;
+          _state = safeRemote;
+          save();
+          // save() 内部会把 lastSync 刷成 now，这里必须把远端时间戳写回去，
+          // 否则下次跨端新旧比较的基准就失真了（表现为「明明云端更新却判定本机新」）。
+          if(_state.meta) _state.meta.lastSync = keepTs;
+          emitCloudStatus('synced');
+        }else{
+          emitCloudStatus('local-newer');
+        }
+      }
       else { emitCloudStatus('local-newer'); }
       return { ok:true, isNew:false };
     }catch(e){
@@ -276,7 +315,7 @@
     markSync(Date.now());
     _cloudSha = null;                   // 新空间首次写入不带 sha（GitHub 据此创建文件）
     try{ localStorage.setItem(_localKey(), JSON.stringify(_state)); }
-    catch(e){ console.warn('本机保存失败', e); }
+    catch(e){ console.warn('本机保存失败', e); emitSaveError('本机保存失败：存储空间可能已满，刚做的改动可能没存上。可清理浏览器存储或删除部分旧数据后再试。'); }
     await cloudPut();
     return true;
   }
@@ -298,7 +337,7 @@
   function save(){
     markSync(Date.now());
     try{ localStorage.setItem(_localKey(), JSON.stringify(_state)); }
-    catch(e){ console.warn('保存失败（可能隐私模式）',e); }
+    catch(e){ console.warn('保存失败（可能隐私模式/配额已满）',e); emitSaveError('本机保存失败：存储空间可能已满，刚做的改动可能没存上。可清理浏览器存储或删除部分旧数据后再试。'); }
     if(_unlocked && CLOUD) scheduleCloudPut();
   }
   function scheduleCloudPut(){
@@ -336,16 +375,23 @@
     _putting = true;
     try{
       const V = window.ZQ.vault;
-      const content = b64u(JSON.stringify(await V.encrypt(_state, _key)));
+      let content = b64u(JSON.stringify(await V.encrypt(_state, _key)));
       let res = await _ghPut(content, _cloudSha);
 
       if(res.status === 409){
-        /* 409 = 远端 sha 变了（别的设备先改了云端副本）→ 拉最新密文 → 解密 → 合并 → 重试一次 */
+        /* 409 = 远端 sha 变了（别的设备先改了云端副本）→ 拉最新密文 → 解密 → 合并 → 重试一次
+           ⚠️ 这里曾经有个致命 bug：合并之后没有重新加密，直接拿合并【前】就算好的 content
+           去重试 PUT —— 结果把对方设备的改动整份覆盖掉，而本机内存里那份正确的合并态
+           再也没有机会上传，等于无声丢数据。所以合并后必须【重新加密】再 PUT。 */
         const got = await _ghGet();
         if(got && got.sha) _cloudSha = got.sha;
         if(got && got.env){
           const remote = await V.decrypt(got.env, _key);
-          if(remote && remote.goals){ _state = _merge(_state, remote); }
+          if(remote && remote.goals){
+            _state = _merge(_state, remote);
+            save();
+            content = b64u(JSON.stringify(await V.encrypt(_state, _key)));   // ← 关键：重新加密
+          }
         }
         res = await _ghPut(content, _cloudSha);
       }
@@ -369,20 +415,57 @@
   function _merge(local, remote){
     const lTs = (local.meta && local.meta.lastSync) || 0;
     const rTs = (remote.meta && remote.meta.lastSync) || 0;
-    const merged = JSON.parse(JSON.stringify(rTs >= lTs ? remote : local));
+    const remoteNewer = rTs >= lTs;
+    const merged = JSON.parse(JSON.stringify(remoteNewer ? remote : local));
+    const other  = remoteNewer ? local : remote;
     merged.tasks = merged.tasks || {};
+
+    // 数组类：按 id 取并集（另一端独有的条目补进来，不覆盖本端已有的）
     ['goals','notes','diaries','log','adviceLog'].forEach(function(k){
-      const base = (rTs >= lTs ? local : remote)[k] || [];
-      const seen = new Set((merged[k]||[]).map(function(x){ return x && x.id; }));
+      const base = other[k] || [];
+      if(!Array.isArray(merged[k])) merged[k] = [];
+      const seen = new Set(merged[k].map(function(x){ return x && x.id; }));
       base.forEach(function(x){ if(x && x.id && !seen.has(x.id)) merged[k].push(x); });
     });
+
+    /* tasks：取【两边日期键的并集】。
+       ⚠️ 曾经的 bug：这里只遍历 local.tasks 的日期键。当「本地较新」时 merged 来自 local，
+       远端设备上独有的那些日期会被整份丢掉（对方那天排好的任务全部消失）。 */
     if(remote.tasks && local.tasks){
-      for(const d in local.tasks){
-        merged.tasks[d] = merged.tasks[d] || [];
-        const rids = new Set(merged.tasks[d].map(function(t){ return t.id; }));
-        local.tasks[d].forEach(function(t){ if(!rids.has(t.id)) merged.tasks[d].push(t); });
-      }
+      const dates = new Set(Object.keys(local.tasks).concat(Object.keys(remote.tasks)));
+      dates.forEach(function(d){
+        const a = local.tasks[d]  || [];
+        const b = remote.tasks[d] || [];
+        const seen = new Set(), out = [];
+        a.concat(b).forEach(function(t){
+          if(!t || !t.id || seen.has(t.id)) return;
+          seen.add(t.id); out.push(t);
+        });
+        merged.tasks[d] = out;
+      });
     }
+
+    /* undercover：连续天数、情报碎片这类是「成就」，若整份取较新一方，
+       另一端的进度会被清零。这里数值取两边较大值、日期取较晚、集合类取并集。 */
+    if(local.undercover && remote.undercover){
+      const lu = local.undercover, ru = remote.undercover;
+      merged.undercover = Object.assign({}, lu, ru);
+      ['streak','intelFragments','totalTasksDone','_allDoneCount','_nightReviews','nightDoneStreak']
+        .forEach(function(k){
+          merged.undercover[k] = Math.max(Number(lu[k]) || 0, Number(ru[k]) || 0);
+        });
+      merged.undercover.lastCompletedDate =
+        (String(lu.lastCompletedDate || '') > String(ru.lastCompletedDate || ''))
+          ? lu.lastCompletedDate : ru.lastCompletedDate;
+      const lt = Array.isArray(lu.titles)  ? lu.titles  : [];
+      const rt = Array.isArray(ru.titles)  ? ru.titles  : [];
+      merged.undercover.titles = Array.from(new Set(lt.concat(rt)));
+      const ls = Array.isArray(lu.secrets) ? lu.secrets : [];
+      const rs = Array.isArray(ru.secrets) ? ru.secrets : [];
+      merged.undercover.secrets = ls.concat(rs).slice(0, 40);
+    }
+
+    merged.meta = merged.meta || {};
     merged.meta.lastSync = Math.max(lTs, rTs);
     return merged;
   }
@@ -437,6 +520,9 @@
       }
       g.stageIndex = safeInt(g.stageIndex, 0, Math.max(0, g.stages.length - 1), 0);
       g.status     = (g.status === 'done') ? 'done' : 'active';
+      g.progress   = goalProgressOf(g);     // ← 回填：阶段推进后进度必须跟着走
+      g.totalTasksDone  = safeInt(g.totalTasksDone, 0, 1e9, 0);
+      g.weeklyTasksDone = safeInt(g.weeklyTasksDone, 0, 1e9, 0);
       return g;
     });
 
@@ -462,7 +548,54 @@
     if(st.log.length > 500)       st.log = st.log.slice(0, 500);
     if(st.notes.length > 2000)    st.notes = st.notes.slice(0, 2000);
     if(st.adviceLog.length > 200) st.adviceLog = st.adviceLog.slice(0, 200);
+
+    /* notes / diaries【逐条】字段校验 —— 为什么非做不可：
+       engine.js 的 weakPointOf 会直接跑 n.text.indexOf(...)，ui.js 也会 n.text.slice(0,24)。
+       只要有一条 note 缺 text 字段，整个随记页 / 今日页就会在启动时 TypeError 白屏，
+       用户连 App 都打不开。所以这里把每条 note 的字段都补齐成确定的类型。 */
+    st.notes = st.notes.filter(n => n && typeof n === 'object').map(n => ({
+      id:         n.id || uid('n'),
+      date:       safeText(n.date, 10) || S.fmtDate(S.today()),
+      text:       safeText(n.text, 4000),        // ← 关键：保证 text 永远是字符串
+      emotion:    safeText(n.emotion, 40),
+      points:     Array.isArray(n.points)   ? n.points.slice(0, 20)   : [],
+      topics:     Array.isArray(n.topics)   ? n.topics.slice(0, 20)   : [],
+      blockers:   Array.isArray(n.blockers) ? n.blockers.slice(0, 20) : [],
+      taskId:     n.taskId || null,
+      refined:    !!n.refined,
+      comfort:    safeText(n.comfort, 2000),
+      suggestion: safeText(n.suggestion, 2000)
+    }));
+    st.diaries = st.diaries.filter(d => d && typeof d === 'object').map(d => Object.assign({}, d, {
+      id:      d.id || uid('d'),
+      date:    safeText(d.date, 10) || S.fmtDate(S.today()),
+      content: safeText(d.content, 20000)
+    }));
+
+    /* undercover：卧底档案页最容易白屏 / 卡死的地方。
+       ui.js 直接用 u.secrets.length、u.titles.includes(...)、Array.from({length: u.intelMax}) ——
+       若 intelMax 是个巨大数字（比如 1e9），页面会去申请 1e9 长度的数组，标签页直接冻死。
+       所以这里所有数值都必须夹到安全区间。 */
     if(!st.undercover || typeof st.undercover !== 'object') st.undercover = seed.undercover;
+    (function(u){
+      const sd = seed.undercover || {};
+      u.codeName        = safeText(u.codeName, 40) || sd.codeName || '执棋者·新兵';
+      u.intelMax        = safeInt(u.intelMax, 1, 200, Number(sd.intelMax) || 24);
+      u.intelFragments  = safeInt(u.intelFragments, 0, u.intelMax, 0);
+      u.streak          = safeInt(u.streak, 0, 9999, 0);
+      u.lostDays        = safeInt(u.lostDays, 0, 9999, 0);
+      u.nightDoneStreak = safeInt(u.nightDoneStreak, 0, 9999, 0);
+      u._allDoneCount   = safeInt(u._allDoneCount, 0, 9999, 0);
+      u._nightReviews   = safeInt(u._nightReviews, 0, 9999, 0);
+      if(!Array.isArray(u.titles))  u.titles  = Array.isArray(sd.titles)  ? sd.titles.slice()  : [];
+      if(!Array.isArray(u.secrets)) u.secrets = Array.isArray(sd.secrets) ? sd.secrets.slice() : [];
+      if(u.secrets.length > 40) u.secrets = u.secrets.slice(0, 40);
+      if(!Array.isArray(u.unlockedStages)) u.unlockedStages = [];
+      if(u.lastCompletedDate && !/^\d{4}-\d{2}-\d{2}$/.test(String(u.lastCompletedDate))){
+        u.lastCompletedDate = null;
+      }
+    })(st.undercover);
+
     if(!st.profile   || typeof st.profile   !== 'object') st.profile    = seed.profile;
     if(!st.meta      || typeof st.meta      !== 'object') st.meta       = seed.meta;
     if(!st.weekFocus || typeof st.weekFocus !== 'object') st.weekFocus  = {};
@@ -608,7 +741,7 @@
   function updateGoal(id,patch){ const g=getGoal(id); if(g){Object.assign(g,patch);save();} return g; }
   function advanceStage(id){
     const g=getGoal(id); if(!g) return null;
-    if(g.stageIndex < g.stages.length-1){ g.stageIndex++; save(); return g; }
+    if(g.stageIndex < g.stages.length-1){ g.stageIndex++; g.progress = goalProgressOf(g); save(); return g; }
     return g;
   }
   // 删除目标：连同它名下的派生任务一并移除，避免出现孤儿任务
@@ -670,8 +803,8 @@
 
   window.ZQ = window.ZQ || {};
   window.ZQ.store = {
-    load, save, reset, exportJSON, importJSON,
-    init, unlock, lock, isUnlocked, currentSpace, createSpace, hasLegacyData, onCloudStatus, isCloud, needUnlock,
+    load, save, reset, exportJSON, importJSON, normalizeState,
+    init, unlock, lock, isUnlocked, currentSpace, createSpace, hasLegacyData, onCloudStatus, onSaveError, isCloud, needUnlock,
     uid, fmtDate, today, shiftDay, weekdayCN, weekdayShort, weekOf, INBOX, isoWeek, weekKey,
     tasksOf, ensureDate, addTask, updateTask, deleteTask, reorder, setDone, onTaskToggled,
     setTaskDate, unscheduled, pushDragLog, dragOutCount, dragInCount, getWeekFocus, setWeekFocus, setWeekSummary,
