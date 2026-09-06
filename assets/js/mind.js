@@ -301,6 +301,217 @@
     }, { score:0, level:'low', reasons:[] });
   }
 
+  /* 2.9 排程校准：判断「给你的量是不是偏乐观了」。
+     ⚠️ 这里踩过一个坑，改动前务必看：
+        最初我试图用「当天已完成任务的 doneAt 首尾时间跨度」当实际耗时，去对比预估时长。
+        但数据模型里【根本没有任务的开始时间】，所以：
+          · 同一分钟勾选两件事 → 跨度 0 → 被当成异常跳过，永远采不到样
+          · 两件事间隔 5 分钟做完 → 会被误判成「估多了」
+        这个指标从数据模型上就测不准，属于伪指标，已废弃。
+        现在改用三个【真正测得到】的信号，都能从现有字段直接算：
+          ① 深夜溢出率：当天的事拖到 23 点后才做完 = 白天装不下
+          ② 计划完成率：计划总时长 vs 实际完成总时长
+          ③ 改期次数  ：dragLog 里近期把任务往后拖了几次（拖 = 排不下） */
+  function timeCalibration(days){
+    days = days || 14;
+    return safe(function(){
+      const st = S.load();
+      let nightSpill = 0, totalDone = 0, planMin = 0, doneMin = 0, activeDays = 0;
+      for(let i=0;i<days;i++){
+        const arr = ((st.tasks||{})[dayStr(-i)]) || [];
+        if(!arr.length) continue;
+        activeDays++;
+        arr.forEach(t=>{
+          planMin += num(t.duration, 15);
+          if(!t.done) return;
+          doneMin += num(t.duration, 15);
+          totalDone++;
+          if(t.doneAt){
+            const h = new Date(t.doneAt).getHours();
+            if(h >= 23 || h < 2) nightSpill++;
+          }
+        });
+      }
+      // 改期次数：dragLog 记录 [{from,to,type,ts}]
+      let drags = 0;
+      const log = (st.profile && st.profile.dragLog) || [];
+      const since = Date.now() - days * 86400000;
+      log.forEach(d=>{ if(num(d.ts, 0) >= since) drags++; });
+
+      const spillRate  = totalDone ? nightSpill / totalDone : 0;
+      const finishRate = planMin   ? doneMin / planMin      : 1;
+      let score = 0;
+      if(spillRate  >= 0.25) score += 40;      // 四分之一以上拖到深夜
+      if(finishRate <  0.60) score += 35;      // 计划只做完不到六成
+      if(drags      >= 4)    score += 25;      // 频繁改期
+      return { level: score >= 55 ? 'under' : score >= 25 ? 'tight' : 'ok',
+               score, nightSpill, totalDone, spillRate,
+               planMin, doneMin, finishRate, drags, activeDays, sampleDays: days };
+    }, { level:'unknown', score:0, nightSpill:0, totalDone:0, spillRate:0,
+         planMin:0, doneMin:0, finishRate:1, drags:0, activeDays:0, sampleDays:days });
+  }
+
+  /* 2.10 黄金时段：从历史 doneAt 反推【你自己】的高效区间（不是通用生理节律） */
+  function goldenWindow(){
+    return safe(function(){
+      const st = S.load();
+      const buckets = {};
+      let total = 0;
+      for(let i=0;i<30;i++){
+        const arr = ((st.tasks||{})[dayStr(-i)]) || [];
+        arr.forEach(t=>{
+          if(!t.doneAt) return;
+          const h = new Date(t.doneAt).getHours();
+          if(!buckets[h]) buckets[h] = 0;
+          buckets[h]++; total++;
+        });
+      }
+      if(total < 8) return { hour:null, share:0, label:null, enough:false };
+      let bestH = null, bestN = 0;
+      Object.keys(buckets).forEach(h=>{
+        if(buckets[h] > bestN){ bestN = buckets[h]; bestH = parseInt(h,10); }
+      });
+      return { hour:bestH, share: bestN/total, enough:true,
+               label: bestH + ':00-' + ((bestH+2)%24) + ':00' };
+    }, { hour:null, share:0, label:null, enough:false });
+  }
+
+  /* 2.11 周期性习惯：同一标题反复出现 = 它是习惯，不是一次性任务。
+     识别出习惯后，它就被当成「链条」——断一天比少做一天更值得提醒。 */
+  function recurring(days, minCount){
+    days = days || 60; minCount = minCount || 3;
+    return safe(function(){
+      const st = S.load();
+      const counter = {};
+      for(let i=0;i<days;i++){
+        const arr = ((st.tasks||{})[dayStr(-i)]) || [];
+        arr.forEach(t=>{
+          const k = String(t.title||'').trim();
+          if(!k) return;
+          if(!counter[k]) counter[k] = { n:0, done:0 };
+          counter[k].n++; if(t.done) counter[k].done++;
+        });
+      }
+      const list = Object.keys(counter)
+        .filter(k=>counter[k].n >= minCount)
+        .map(k=>({ title:k, times:counter[k].n, done:counter[k].done,
+                   rate: counter[k].n ? counter[k].done/counter[k].n : 0 }))
+        .sort((a,b)=> b.times - a.times);
+      return { list, has: list.length>0, top: list[0]||null };
+    }, { list:[], has:false, top:null });
+  }
+
+  /* 2.12 复习时机：按遗忘曲线（1 / 2 / 4 / 7 / 15 天）判断该回头复习什么。
+     背单词、刷题这类「学了会忘」的目标，不复习等于白学。 */
+  const REVIEW_GAPS = [1, 2, 4, 7, 15];
+  function reviewTiming(){
+    return safe(function(){
+      const st = S.load();
+      const due = [];
+      (st.goals||[]).forEach(g=>{
+        if(g.status === 'done') return;
+        let lastLearn = null;
+        for(let i=0;i<30 && lastLearn === null;i++){
+          const arr = (((st.tasks||{})[dayStr(-i)])||[]).filter(t=>t.goalId===g.id && t.done);
+          if(arr.length) lastLearn = i;
+        }
+        if(lastLearn === null || lastLearn === 0) return;   // 没学过 / 今天刚学
+        const hit = REVIEW_GAPS.filter(gap=> lastLearn >= gap);
+        if(hit.length) due.push({ goal:g, title:g.title, lastDays:lastLearn, gap: hit[hit.length-1] });
+      });
+      due.sort((a,b)=> b.lastDays - a.lastDays);
+      return { due, has: due.length>0, worst: due[0]||null };
+    }, { due:[], has:false, worst:null });
+  }
+
+  /* 2.13 目标可达性：剩余天数 × 当前进度 → 每天要推多少 → 来不来得及。
+     这是「大棋局」最该算的一笔账：不是催你快跑，是提前告诉你要不要调整目标。 */
+  function goalFeasibility(){
+    return safe(function(){
+      const st = S.load();
+      const out = [];
+      (st.goals||[]).forEach(g=>{
+        if(g.status === 'done') return;
+        const h = safe(function(){ return (B && B.goalHealth) ? B.goalHealth(g) : null; }, null);
+        const remain = num(h && h.remainDays, 0);
+        const prog   = clamp01(num(h && h.progRatio, 0));
+        const need   = remain > 0 ? (1 - prog) / remain : 1;   // 每天需推进的比例
+        let gAll = 0, gDone = 0;
+        for(let i=0;i<7;i++){
+          const arr = ((st.tasks||{})[dayStr(-i)]) || [];
+          arr.forEach(t=>{ if(t.goalId === g.id){ gAll++; if(t.done) gDone++; } });
+        }
+        const active = gAll ? gDone/gAll : 0;
+        const verdict = (remain <= 0) ? 'expired'
+                      : (need > 0.05 && active < 0.3) ? 'risk'
+                      : (need > 0.03 && active < 0.5) ? 'tight' : 'safe';
+        out.push({ goal:g, title:g.title, remainDays:remain, prog:prog,
+                   needPerDay:need, recentActive:active, verdict });
+      });
+      out.sort((a,b)=> b.needPerDay - a.needPerDay);
+      return { list: out, has: out.length>0, worst: out[0]||null,
+               risky: out.filter(x=>x.verdict==='risk'||x.verdict==='expired') };
+    }, { list:[], has:false, worst:null, risky:[] });
+  }
+
+  /* 2.14 任务聚类：同一目标 / 同类型的待办凑一起做，减少切换成本。
+     ISFJ 对「中断—重入」很敏感，批量处理能显著降低消耗。 */
+  function taskAffinity(dateStr){
+    return safe(function(){
+      const arr = (S.tasksOf(dateStr || todayStr())||[]).filter(t=>!t.done);
+      const groups = {};
+      arr.forEach(t=>{
+        const k = (t.goalId||'__none__') + '|' + (t.type||'fragment');
+        (groups[k] = groups[k] || []).push(t);
+      });
+      const clusters = Object.keys(groups)
+        .map(k=>({ key:k, tasks:groups[k], size:groups[k].length,
+                   minutes: groups[k].reduce((s,t)=>s+num(t.duration,15),0) }))
+        .filter(c=> c.size >= 2)
+        .sort((a,b)=> b.size - a.size);
+      return { clusters, has: clusters.length>0, top: clusters[0]||null };
+    }, { clusters:[], has:false, top:null });
+  }
+
+  /* 2.15 情绪-任务匹配：情绪低落时不该安排需要创造力的硬任务 */
+  function moodFit(dateStr){
+    return safe(function(){
+      const ds = dateStr || todayStr();
+      const notes = ((S.load().notes)||[]).filter(n=>n.date===ds);
+      const mood  = notes.length ? notes[0].emotion : null;
+      if(!mood) return { mood:null, level:'unknown' };
+      const s = String(mood);
+      if(/累|烦|焦虑|丧|崩|不想|撑不住|压力|难受/.test(s)) return { mood, level:'low' };
+      if(/开心|不错|顺利|有劲|状态好|轻松|兴奋/.test(s))    return { mood, level:'high' };
+      return { mood, level:'neutral' };
+    }, { mood:null, level:'unknown' });
+  }
+
+  /* 2.16 一周落子布局：把「今天」放回整周里看 —— 哪天最重、哪天空着、均不均。
+     天秤座的均衡感需要这个视角：不是每天都要满，是七天要匀。 */
+  function weeklyMoves(){
+    return safe(function(){
+      const st = S.load();
+      const days = [];
+      for(let i=0;i<7;i++){
+        const ds  = dayStr(i);
+        const arr = ((st.tasks||{})[ds]) || [];
+        const wd  = new Date(ds + 'T00:00:00').getDay();
+        days.push({ date:ds, weekdayCN: (S.weekdayCN||[])[wd] || String(wd),
+                    total:arr.length, done:arr.filter(t=>t.done).length,
+                    minutes: arr.reduce((s,t)=>s+num(t.duration,15),0) });
+      }
+      const totalMin = days.reduce((s,d)=>s+d.minutes,0);
+      const busy  = days.slice().sort((a,b)=>b.minutes-a.minutes)[0];
+      const empty = days.filter(d=>d.total===0).length;
+      const avg   = totalMin/7 || 0;
+      const balance = (avg <= 0) ? 1
+        : clamp01(1 - days.reduce((s,d)=>s+Math.abs(d.minutes-avg),0)/(avg*7));
+      return { days, totalMin, busy, emptyDays:empty, balance,
+               level: balance < 0.5 ? 'uneven' : 'ok' };
+    }, { days:[], totalMin:0, busy:null, emptyDays:7, balance:1, level:'ok' });
+  }
+
   /* =========================================================
      3. 落子规划 —— 本模块的核心，把「待办清单」升级成「一盘棋」
 
@@ -575,6 +786,77 @@
       '我替你排好了。你只管照着做，剩下的是我的事。',
       '不急。一子一子来，棋局还长。',
       '你已经比昨天多走了一步，这就够了。'
+    ],
+
+    /* ===== 以下为第二轮新增 ===== */
+
+    /* 排程偏乐观：深夜溢出 + 计划做不完 + 频繁改期 */
+    timeUnderestimate: [
+      '近 {n} 天里，你有 {s} 件事拖到深夜才做完，计划只完成了 {p}%。不是你慢，是排得太满——今天我替你减一子。',
+      '数据摆在这：计划只做完 {p}%，还改期了 {d} 次。该调的是排布，不是你的能力。',
+      '你最近的排程偏乐观了（完成 {p}%，{s} 件拖到深夜）。从今天起我按你的真实容量来排，不再按理想状态排。'
+    ],
+    /* 黄金时段（用你自己的历史数据算出来的） */
+    goldenWindow: [
+      '{t} 是你自己数据里的高效时段——过去的任务大多在这个区间完成。把最硬的那件挪过来。',
+      '现在是你常出活的时段（{t}）。别拿它回消息，拿它啃硬骨头。',
+      '你的黄金时间是 {t}。今天最难的那一子，就放在这会。'
+    ],
+    /* 习惯链条 */
+    habitChain: [
+      '「{t}」你已经在做了 {n} 次，它是你的链条，不是待办。今天别断——断一次，重接要三天。',
+      '「{t}」快成习惯了（已坚持 {n} 次）。习惯这东西，断一天比少做一天贵得多。',
+      '你已经把「{t}」做了 {n} 次。再撑几天，它就不再需要意志力了。'
+    ],
+    /* 该复习了（遗忘曲线） */
+    reviewDue: [
+      '「{t}」已经 {d} 天没回头看了。忘得快是正常的，但复习一次就能拉回来——今天花十分钟过一遍。',
+      '「{t}」欠了一次复习（{d} 天了）。学过的东西不回头，等于白学。今天补上。',
+      '该复习「{t}」了，距上次已经 {d} 天。不用重新学，过一遍就行。'
+    ],
+    /* 目标来不及了 */
+    goalInfeasible: [
+      '「{t}」按现在的速度，剩下的 {d} 天不够用了。这不是坏消息——提前知道，就能提前改：要么加量，要么把目标挪一挪。你选，我配合。',
+      '「{t}」每天需要推进 {p} 才来得及，但你近一周的实际活跃度只有 {a}。别硬扛，我们调一下节奏或目标。',
+      '我算过了：「{t}」当前进度追不上剩余天数。早发现早调整，总比到最后一天才发现强。'
+    ],
+    /* 可以批量做 */
+    batchReady: [
+      '你有 {n} 件事是同一类的。分开做要切换三次脑子，凑一起做只要一次——先清这一类。',
+      '「{t}」这类攒了 {n} 件。批量处理，一口气做完，比来回切换省一半力气。'
+    ],
+    /* 情绪低时不啃硬的 */
+    moodLowTask: [
+      '你今天状态不高（{m}）。别逼自己啃最硬的那件——先做机械的、重复的，把完成感找回来。',
+      '情绪在低位的时候，硬任务只会做成「做了一半」。今天先挑不用动脑的，等状态回来再攻。',
+      '今天你记下了「{m}」。这种时候不适合开新的大工程，适合清尾巴。'
+    ],
+    /* 一周不匀 */
+    weekUneven: [
+      '这七天排得不匀：{t} 压了 {m} 分钟，却有 {n} 天是空的。天平要两边都放东西才稳——我建议你匀一匀。',
+      '七天里 {n} 天空着，最重的那天却有 {m} 分钟。不是每天都要满，是要匀。今天我来重新分配。'
+    ],
+    /* 里程碑临近 */
+    milestone: [
+      '「{t}」已经走到 {p}% 了。最后这段最容易松——撑住，就快看得见终点了。',
+      '「{t}」到 {p}% 了。你现在的位置，是刚开始时的你想不到的。',
+      '「{t}」完成了 {p}%。别在这时候换方向，也别在这时候停。'
+    ],
+    /* 拖延早期（还没完全卡死时提醒） */
+    procrastEarly: [
+      '有 {n} 件挂着，今天还没开头。现在挑最短的那件做掉——只要动起来，后面就顺了。',
+      '{n} 件待办，一件没动。别想全部，先想第一件。第一件通常只要五分钟。',
+      '你卡在「还没开始」这一步。开始是唯一难的，后面都是惯性。'
+    ],
+    /* 数据足够（给更准的建议） */
+    dataRich: [
+      '你攒了 {d} 天的数据，我现在对你的判断准多了——往后的建议会更贴你自己，不再是通用模板。',
+      '用了 {d} 天，你的节奏我已经摸清了。接下来我给的量会更准。'
+    ],
+    /* 新手期 */
+    firstWeek: [
+      '你才用没几天。别急着追完成率，先把「每天打开一次」这件事守住。习惯比强度重要。',
+      '刚开始这几天，能做一件就算赢。别一上来就排满——排满的人，第三天就不见了。'
     ]
   };
 
@@ -700,7 +982,71 @@
 
     { id:'bigPicture', pri:20,
       when:(c,m)=> true,     // 永远命中，作为「大局观」的日常一剂
-      text:(c,m)=> m.bigPicture.text }
+      text:(c,m)=> m.bigPicture.text },
+
+    /* ===== 以下为第二轮新增（基于 2.9~2.16 的新算法） ===== */
+
+    { id:'goalInfeasible', pri:90,
+      when:(c,m)=> !!(m.feasibility && m.feasibility.risky && m.feasibility.risky.length),
+      text:(c,m)=>{ const x = m.feasibility.risky[0];
+        return fill(pick(LINES.goalInfeasible, c.date+'gi'+x.goal.id),
+          { t:x.title, d:Math.max(0, x.remainDays),
+            p:(x.needPerDay*100).toFixed(1), a:Math.round(x.recentActive*100) }); } },
+
+    { id:'procrastEarly', pri:76,
+      when:(c,m)=> m.pending>=3 && c.tasksDone===0 && c.hour>=10,
+      text:(c,m)=> fill(pick(LINES.procrastEarly, c.date+'pe'), { n:m.pending }) },
+
+    { id:'timeCal', pri:64,
+      when:(c,m)=> !!(m.timeCal && (m.timeCal.level==='under' || m.timeCal.level==='tight')),
+      text:(c,m)=> fill(pick(LINES.timeUnderestimate, c.date+'tc'),
+              { n:m.timeCal.sampleDays, s:m.timeCal.nightSpill,
+                p:Math.round(m.timeCal.finishRate*100), d:m.timeCal.drags }) },
+
+    { id:'reviewDue', pri:62,
+      when:(c,m)=> !!(m.review && m.review.has && m.review.worst),
+      text:(c,m)=> fill(pick(LINES.reviewDue, c.date+'rv'+m.review.worst.goal.id),
+              { t:m.review.worst.title, d:m.review.worst.lastDays }) },
+
+    { id:'moodLowTask', pri:58,
+      when:(c,m)=> !!(m.moodFit && m.moodFit.level==='low') && m.pending>0,
+      text:(c,m)=> fill(pick(LINES.moodLowTask, c.date+'ml'), { m:m.moodFit.mood }) },
+
+    { id:'weekUneven', pri:55,
+      when:(c,m)=> !!(m.persona.needsBalance && m.weekly && m.weekly.level==='uneven'),
+      text:(c,m)=> fill(pick(LINES.weekUneven, c.date+'wu'),
+              { t:(m.weekly.busy && m.weekly.busy.weekdayCN) || '某天',
+                m:(m.weekly.busy && m.weekly.busy.minutes) || 0, n:m.weekly.emptyDays }) },
+
+    { id:'goldenWindow', pri:52,
+      when:(c,m)=> !!(m.golden && m.golden.enough && m.pending>0)
+                   && m.golden.hour === new Date().getHours(),
+      text:(c,m)=> fill(pick(LINES.goldenWindow, c.date+'gw'), { t:m.golden.label }) },
+
+    { id:'habitChain', pri:45,
+      when:(c,m)=> !!(m.recur && m.recur.has && m.recur.top && m.recur.top.times>=4),
+      text:(c,m)=> fill(pick(LINES.habitChain, c.date+'hc'),
+              { t:m.recur.top.title, n:m.recur.top.done }) },
+
+    { id:'milestone', pri:43,
+      when:(c,m)=> !!(c.goals && c.goals.some(g=>g.state!=='done' && g.progRatio>=0.9)),
+      text:(c,m)=>{ const g = c.goals.filter(x=>x.state!=='done' && x.progRatio>=0.9)[0];
+        return fill(pick(LINES.milestone, c.date+'ms'+g.goal.id),
+          { t:g.goal.title, p:Math.round(g.progRatio*100) }); } },
+
+    { id:'batchReady', pri:38,
+      when:(c,m)=> !!(m.affinity && m.affinity.has && m.affinity.top),
+      text:(c,m)=> fill(pick(LINES.batchReady, c.date+'br'),
+              { n:m.affinity.top.size,
+                t:(m.affinity.top.tasks[0] && m.affinity.top.tasks[0].title) || '这类事' }) },
+
+    { id:'dataRich', pri:22,
+      when:(c,m)=> m.activeDays >= 14,
+      text:(c,m)=> fill(pick(LINES.dataRich, c.date+'dr'), { d:m.activeDays }) },
+
+    { id:'firstWeek', pri:18,
+      when:(c,m)=> m.activeDays > 0 && m.activeDays <= 5,
+      text:(c,m)=> pick(LINES.firstWeek, c.date+'fw') }
   ];
 
   /* 5.1 度量汇总：一次算齐全套指标，供扫描器与简报复用（避免各自重复扫描） */
@@ -729,6 +1075,15 @@
       return arr.slice().sort((a,b)=> num(b.duration,15) - num(a.duration,15))[0];
     }, null);
 
+    // 累计有任务的天数（判断「新手期」还是「数据够了」）
+    const activeDays = safe(function(){
+      let n = 0;
+      const keys = Object.keys(st.tasks || {});
+      keys.forEach(k=>{ if(k === 'INBOX') return;
+        const a = st.tasks[k]; if(Array.isArray(a) && a.length) n++; });
+      return n;
+    }, 0);
+
     return {
       persona: pf,
       energy: energyNow(ds),
@@ -740,7 +1095,17 @@
       plateau: plateau(10),
       recovery: recoveryNeed(ds),
       bigPicture: bigPicture(ds),
+      /* —— 第二轮新增：2.9 ~ 2.16 —— */
+      timeCal:     timeCalibration(14),   // 预估 vs 实际偏差
+      golden:      goldenWindow(),        // 个人黄金时段
+      recur:       recurring(60, 3),      // 周期性习惯
+      review:      reviewTiming(),        // 遗忘曲线复习时机
+      feasibility: goalFeasibility(),     // 目标可达性
+      affinity:    taskAffinity(ds),      // 同类的可批量任务
+      moodFit:     moodFit(ds),           // 情绪—任务匹配
+      weekly:      weeklyMoves(),         // 一周布局
       socialPressure, hardest, pending,
+      activeDays,
       streakDays: num(u.streak, 0)
     };
   }
@@ -803,11 +1168,16 @@
      ========================================================= */
   window.ZQ = window.ZQ || {};
   window.ZQ.mind = {
+    /* 第一轮：人格 + 8 个深度度量 + 落子规划 */
     persona, energyNow, momentum, commitment, burnoutRisk,
     decisionLoad, weekBalance, plateau, recoveryNeed,
     movePlan, microStart, bigPicture,
+    /* 第二轮：8 个新算法 */
+    timeCalibration, goldenWindow, recurring, reviewTiming,
+    goalFeasibility, taskAffinity, moodFit, weeklyMoves,
+    /* 调度与输出 */
     scan, brief, moveLine, metrics,
-    LINES, DETECTORS,
+    LINES, DETECTORS, REVIEW_GAPS,
     pick, fill
   };
 })();
