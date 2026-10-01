@@ -114,7 +114,7 @@
       undercover:JSON.parse(JSON.stringify(DEFAULT_UNDERCOVER)),
       log:[],            // 军师消息流 {id,date,from,text,kind}
       adviceLog:[],      // 军师建议记忆 {id,topic,blocker,level,date} —— 用于建议去重与递进
-      meta:{ createdAt:now, lastOpen:now }
+      meta:{ createdAt:now, lastOpen:now, lastSync:0 }   // lastSync=0 是「从未与云端同步过」的哨兵：新设备不会被误判为「本机较新」
     };
   }
 
@@ -202,7 +202,7 @@
       const raw = localStorage.getItem(_localKey());
       if(raw){ _state = JSON.parse(raw); }
     }catch(e){ console.warn('读取失败',e); }
-    if(!_state || !_state.goals){ _state = buildSeed(); save(); }
+    if(!_state || !_state.goals){ _state = buildSeed(); _persistSeed(); }
     return _state;
   }
 
@@ -242,29 +242,25 @@
       }
       _cloudSha = got.sha;                      // 记下 blob sha，写回时带它做乐观并发
       const remote = await V.decrypt(got.env, _key);
-      if(!remote || !remote.goals) throw new Error('BAD_PAYLOAD');
-      const rTs = (remote.meta && remote.meta.lastSync) || 0;
-      const lTs = (_state.meta && _state.meta.lastSync) || 0;
-      if(rTs > lTs){
-        /* 云端数据同样是【不可信输入】：拿到 token 的人可以改仓库里那个密文容器，
-           旧版本也可能写入过结构不完整的数据。必须过一遍 normalizeState：
-           既补齐字段防止白屏，也顺手净化颜色这类会拼进 HTML 属性的值
-           （否则导入端做的 safeHex 净化对云端数据完全失效）。 */
-        let safeRemote = null;
-        try{ safeRemote = normalizeState(remote); }catch(e){ safeRemote = null; }
-        if(safeRemote){
-          const keepTs = (remote.meta && remote.meta.lastSync) || 0;
-          _state = safeRemote;
-          save();
-          // save() 内部会把 lastSync 刷成 now，这里必须把远端时间戳写回去，
-          // 否则下次跨端新旧比较的基准就失真了（表现为「明明云端更新却判定本机新」）。
-          if(_state.meta) _state.meta.lastSync = keepTs;
-          emitCloudStatus('synced');
-        }else{
-          emitCloudStatus('local-newer');
-        }
-      }
-      else { emitCloudStatus('local-newer'); }
+      if(!remote || !remote.goals) throw new Error('BAD_PAYLOAD');   // 密文被篡改 / AES-GCM 认证失败
+
+      /* 云端数据同样是【不可信输入】：必须过一遍 normalizeState 补齐字段、净化颜色，
+         避免白屏或 XSS。即便 normalizeState 因异常失败，也退而直接用 remote（它来自本 App 的加密，结构同源），
+         绝不再「因净化失败就当作本机较新」而把云端数据整份丢弃 —— 那正是多设备不同步的根因。 */
+      let safeRemote = null;
+      try{ safeRemote = normalizeState(remote); }catch(e){ safeRemote = null; }
+      if(!safeRemote) safeRemote = remote;
+
+      /* 关键收敛逻辑：本机与云端【永远做字段级并集合并】，而不是「谁时间戳新就整份覆盖谁」。
+         - 新设备：本机是空种子（lastSync=0）→ 合并后方略 = 云端数据，正确拉取，不再显示空白。
+         - 任一端离线编辑过：合并把两端独有条目都并集进来，再立刻推回云端 → 两端最终是同一份。
+         这正是「多设备进去数据都一样」的保证。 */
+      _state = _merge(_state, safeRemote);
+      const keepTs = Math.max((safeRemote.meta && safeRemote.meta.lastSync) || 0, Date.now());
+      if(_state.meta) _state.meta.lastSync = keepTs;
+      _persistLocal();                          // 落本机（合并结果）
+      await cloudPut();                         // 立刻把合并结果推上云端，保证两端收敛为同一份
+      emitCloudStatus('synced');
       return { ok:true, isNew:false };
     }catch(e){
       const m = e && e.message;
@@ -325,6 +321,7 @@
   async function init(){
     load();
     _isCloud = false;
+    _setupAutoFlush();
     return _state;
   }
 
@@ -334,10 +331,22 @@
   let _putTimer = null;
   let _putting  = false;    // 写串行化：避免两次请求用同一个 sha 互相把对方打成 409
   let _pending  = false;    // 写过程中又产生了新改动 → 结束后补一次
-  function save(){
+  /* 仅落本机（刷新 lastSync + 触发云传）。所有「用户改动」都走这里。 */
+  function _persistLocal(){
     markSync(Date.now());
     try{ localStorage.setItem(_localKey(), JSON.stringify(_state)); }
     catch(e){ console.warn('保存失败（可能隐私模式/配额已满）',e); emitSaveError('本机保存失败：存储空间可能已满，刚做的改动可能没存上。可清理浏览器存储或删除部分旧数据后再试。'); }
+  }
+  /* 仅落本机、不刷新 lastSync、不触发云传：用于「从未同步过的全新种子」。
+     关键：若这里也 markSync(now)，新设备的种子会被盖上「当前时间」的戳，
+     而 unlock 用 rTs>lTs 判断新旧 —— 云端真实数据的时间戳一定早于「现在」，于是被误判成
+     「本机较新」→ 永远不拉云端、显示空白；更糟的是一旦编辑就带这个更新的戳覆盖云端，冲掉第一台设备的数据。 */
+  function _persistSeed(){
+    try{ localStorage.setItem(_localKey(), JSON.stringify(_state)); }
+    catch(e){ console.warn('保存失败（可能隐私模式/配额已满）',e); emitSaveError('本机保存失败：存储空间可能已满，刚做的改动可能没存上。可清理浏览器存储或删除部分旧数据后再试。'); }
+  }
+  function save(){
+    _persistLocal();
     if(_unlocked && CLOUD) scheduleCloudPut();
   }
   function scheduleCloudPut(){
@@ -348,6 +357,22 @@
         console.warn('[云同步] 写入失败：', err && err.message); emitCloudStatus('fail');
       });
     }, 600);   // 防抖：连续操作合并成一次 PUT（省请求费、也降低撞锁概率）
+  }
+  /* 关页/切后台前，把还在防抖期里没发出去的改动立刻补传一次。
+     否则用户「改完马上关 App」的改动永远卡在 600ms 定时器里、根本没上传 → 看起来就是「不同步」。
+     keepalive:true 让这次 PUT 在页面卸载时也能送达（GitHub 信封通常远小于 64KB 上限）。 */
+  function flush(){
+    if(!_unlocked || !CLOUD || !_state || !_key) return;
+    if(_putTimer){ clearTimeout(_putTimer); _putTimer = null; }
+    if(_putting) return;            // 已有写在进行，让它自己传完
+    _persistLocal();
+    cloudPut(true).catch(function(){});
+  }
+  function _setupAutoFlush(){
+    if(typeof document === 'undefined' || !document.addEventListener) return;
+    var onHide = function(){ if(document.visibilityState === 'hidden') flush(); };
+    document.addEventListener('visibilitychange', onHide);
+    if(typeof window !== 'undefined' && typeof window.addEventListener === 'function'){ window.addEventListener('pagehide', flush); }
   }
   /* GitHub 读：返回 { sha, env } / { notFound:true } / { error }。
      公开仓库即便不带 token 也能读，但带 token 限额更高（认证 5000/h）。 */
@@ -364,36 +389,54 @@
     }catch(e){ return { error: (e && e.message) || 'net' }; }
   }
   /* GitHub 写：把密文信封 PUT 进 <dir>/<spaceId>.json。带 sha = 乐观并发更新；不带 = 创建。 */
-  async function _ghPut(content, sha){
+  async function _ghPut(content, sha, keepalive){
     const body = { message: 'zhiqi sync: ' + _spaceId, content, branch: CLOUD.branch };
     if(sha) body.sha = sha;
-    return await fetch(_vaultApi(), { method:'PUT', headers: _ghHeaders(), body: JSON.stringify(body) });
+    return await fetch(_vaultApi(), { method:'PUT', headers: _ghHeaders(), body: JSON.stringify(body), keepalive: !!keepalive });
   }
 
-  async function cloudPut(){
+  async function cloudPut(keepalive){
     if(!_state || !_key || !CLOUD){ return; }
+    if(_putting){ _pending = true; return; }   // 已有写在进行：标记补传，结束后由 finally 触发
     _putting = true;
     try{
       const V = window.ZQ.vault;
       let content = b64u(JSON.stringify(await V.encrypt(_state, _key)));
-      let res = await _ghPut(content, _cloudSha);
 
-      if(res.status === 409){
-        /* 409 = 远端 sha 变了（别的设备先改了云端副本）→ 拉最新密文 → 解密 → 合并 → 重试一次
-           ⚠️ 这里曾经有个致命 bug：合并之后没有重新加密，直接拿合并【前】就算好的 content
-           去重试 PUT —— 结果把对方设备的改动整份覆盖掉，而本机内存里那份正确的合并态
-           再也没有机会上传，等于无声丢数据。所以合并后必须【重新加密】再 PUT。 */
+      /* 没有可靠 sha（降级进入 / 首次写入 / 上次取 sha 失败）→ 先取一次最新 sha。
+         404 = 云端还没有这个文件 → sha 保持 null，下面的 PUT 即「创建」。
+         这样即便 unlock 因网络失败退回降级、_cloudSha 为空，第一次 save 也能自愈，
+         不会再因「缺 sha 写已存在文件」而永久 422/409 失败、从此不同步。 */
+      if(_cloudSha == null){
+        const g0 = await _ghGet();
+        if(g0 && g0.notFound){ _cloudSha = null; }
+        else if(g0 && g0.sha){ _cloudSha = g0.sha; }
+        else if(g0 && g0.error){
+          console.warn('[云同步] 取 sha 失败，本机数据已保留：', g0.error);
+          emitCloudStatus('fail');
+          return;                               // 网络仍不通：不抛错、不影响本机；下次 save 会再试
+        }
+      }
+
+      let res = await _ghPut(content, _cloudSha, keepalive);
+
+      if(res.status === 409 || res.status === 422){
+        /* 乐观并发冲突 / 缺 sha：拉最新密文 → 解密 → 合并 → 重新加密 → 带最新 sha 重试。
+           ⚠️ 曾经有个致命 bug：合并之后没有重新加密，直接拿合并【前】就算好的 content 去重试 PUT
+           —— 结果把对方设备的改动整份覆盖掉，等于无声丢数据。所以合并后必须【重新加密】再 PUT。 */
         const got = await _ghGet();
         if(got && got.sha) _cloudSha = got.sha;
         if(got && got.env){
-          const remote = await V.decrypt(got.env, _key);
-          if(remote && remote.goals){
-            _state = _merge(_state, remote);
-            save();
-            content = b64u(JSON.stringify(await V.encrypt(_state, _key)));   // ← 关键：重新加密
-          }
+          try{
+            const remote = await V.decrypt(got.env, _key);
+            if(remote && remote.goals){
+              _state = _merge(_state, remote);
+              _persistLocal();                  // 落本机（合并结果）
+              content = b64u(JSON.stringify(await V.encrypt(_state, _key)));   // ← 关键：重新加密
+            }
+          }catch(e){ /* 解密失败（图案不一致）不覆盖；用本机继续 */ }
         }
-        res = await _ghPut(content, _cloudSha);
+        res = await _ghPut(content, _cloudSha, keepalive);
       }
 
       if(!res.ok) throw new Error('HTTP ' + res.status);
@@ -804,7 +847,7 @@
   window.ZQ = window.ZQ || {};
   window.ZQ.store = {
     load, save, reset, exportJSON, importJSON, normalizeState,
-    init, unlock, lock, isUnlocked, currentSpace, createSpace, hasLegacyData, onCloudStatus, onSaveError, isCloud, needUnlock,
+    init, unlock, lock, isUnlocked, currentSpace, createSpace, hasLegacyData, onCloudStatus, onSaveError, isCloud, needUnlock, flush,
     uid, fmtDate, today, shiftDay, weekdayCN, weekdayShort, weekOf, INBOX, isoWeek, weekKey,
     tasksOf, ensureDate, addTask, updateTask, deleteTask, reorder, setDone, onTaskToggled,
     setTaskDate, unscheduled, pushDragLog, dragOutCount, dragInCount, getWeekFocus, setWeekFocus, setWeekSummary,
