@@ -436,6 +436,8 @@
      ========================================================= */
   function renderManual(){
     const st=S.load();
+    // 封存原因 → 温柔文案（天秤座 ISFJ：不用「失败/提交失败」这类刺眼词）
+    const SEAL_LABEL = { exam:'考试已结束', submit:'已提交', apply:'已投递', health:'已就诊/检查', other:'已交付', pause:'暂缓中' };
     let goalsHtml = st.goals.map(g=>{
       const plan=E.weeklyPlanFor(g);
       const weekRows=[1,2,3,4,5,6,0].map(wd=>{
@@ -444,25 +446,52 @@
       }).join('');
       const stagePills=g.stages.map((s,i)=>`<span class="stage-pill ${i<g.stageIndex?'done':i===g.stageIndex?'active':''}">${esc(s.name)}</span>`).join('');
       const prog=Math.round(g.stageIndex/(g.stages.length)*100);
+      const isDone = g.status==='done';
+      const isSealed = g.status==='sealed';
+      const pillText = isDone?'已完成' : isSealed?'封存中·等结果' : '进行中';
+      const pillCls = isDone?'done' : isSealed?'sealed' : '';
+      // 封存期间不显示「本周任务」（本就不派发），改为温柔的等待提示
+      const weekBlock = isSealed ? '' : `
+        <div class="card-title mt12" style="font-size:14px">🗓 本周任务</div>
+        <table class="week-table"><tr><th>星期</th><th>任务</th></tr>${weekRows}</table>`;
+      let actionRow;
+      if(isSealed){
+        const reasonLabel = (g.sealReason && SEAL_LABEL[g.sealReason]) || '已交付';
+        const reached = g.expectResultAt && g.expectResultAt <= S.fmtDate(S.today());
+        const sealTip = reached ? `<div class="goal-seal-tip">结果应该快出了，想看的时候点「出结果了」就好 🤍</div>` : '';
+        const pauseNote = g.sealReason==='pause' ? `<div class="goal-seal-tip">先歇一阵，没关系的。想好了随时回来。</div>` : '';
+        actionRow = `
+          <div class="goal-seal">${esc(reasonLabel)}${g.expectResultAt?` · 预计 ${esc(g.expectResultAt)}`:''}</div>
+          ${sealTip}${pauseNote}
+          <div class="row wrap mt12">
+            <button class="btn mint sm" data-result="${g.id}">出结果了</button>
+            <button class="btn ghost sm danger" data-delgoal="${g.id}">删除目标</button>
+          </div>`;
+      } else if(!isDone){
+        actionRow = `
+          <div class="row wrap mt12">
+            ${g.stageIndex<g.stages.length-1?`<button class="btn ghost sm" data-advance="${g.id}">推进到下一阶段</button>`:''}
+            <button class="btn mint sm" data-complete="${g.id}">完成目标</button>
+            <button class="btn ghost sm" data-seal="${g.id}">封存待结果</button>
+            <button class="btn ghost sm danger" data-delgoal="${g.id}">删除目标</button>
+          </div>`;
+      } else {
+        actionRow = `<div class="row wrap mt12"><button class="btn ghost sm danger" data-delgoal="${g.id}">删除目标</button></div>`;
+      }
       return `
-      <div class="card goal-card" style="border-left-color:${g.color}">
+      <div class="card goal-card ${isSealed?'sealed':''}" style="border-left-color:${g.color}">
         <div class="goal-top">
           <div style="flex:1;min-width:0">
             <div class="goal-name">${esc(g.title)}</div>
             <div class="goal-cat">${esc(g.category)} · 现状：${esc(g.current)} → 目标：${esc(g.target)}</div>
           </div>
-          <span class="stage-pill ${g.status==='done'?'done':''}">${g.status==='done'?'已完成':'进行中'}</span>
+          <span class="stage-pill ${pillCls}">${pillText}</span>
         </div>
-        <div class="goal-prog"><i style="width:${g.status==='done'?100:prog}%"></i></div>
+        <div class="goal-prog"><i style="width:${isDone?100:prog}%"></i></div>
         <div class="goal-prog-txt"><span>阶段进度 ${g.stageIndex+1}/${g.stages.length}</span><span>第${S.weekOf(g.createdAt)}周</span></div>
         <div class="stage-flow">${stagePills}</div>
-        <div class="card-title mt12" style="font-size:14px">🗓 本周任务</div>
-        <table class="week-table"><tr><th>星期</th><th>任务</th></tr>${weekRows}</table>
-        <div class="row wrap mt12">
-          ${g.status!=='done'&&g.stageIndex<g.stages.length-1?`<button class="btn ghost sm" data-advance="${g.id}">推进到下一阶段</button>`:''}
-          ${g.status!=='done'?`<button class="btn mint sm" data-complete="${g.id}">完成目标</button>`:''}
-          <button class="btn ghost sm danger" data-delgoal="${g.id}">删除目标</button>
-        </div>
+        ${weekBlock}
+        ${actionRow}
       </div>`;
     }).join('');
 
@@ -506,6 +535,8 @@
         S.deleteGoal(x.dataset.delgoal); toast('目标已移除。想再开局的时候，随时立一个新目标。'); renderManual(); updateTopbar();
       }, true);
     }));
+    view.querySelectorAll('[data-seal]').forEach(x=>x.addEventListener('click',()=>sealGoalForm(x.dataset.seal)));
+    view.querySelectorAll('[data-result]').forEach(x=>x.addEventListener('click',()=>resultFlow(x.dataset.result)));
     view.querySelectorAll('[data-addreco]').forEach(x=>x.addEventListener('click',()=>{
       const [title,cat,weekly]=x.dataset.addreco.split('|');
       addRecommendedGoal(title,cat,weekly);
@@ -544,6 +575,84 @@
       current:'新棋局', target:'由军师陪你达成', dailyTime:20, weeklyDays:5,
       resources:'—', stages:defaultStages() });
     toast(`已加入谋局：${title}`); renderManual(); updateTopbar();
+  }
+  /* 封存待结果：考完/交稿/投递后结果未出，温柔地把它收起来，不催不派任务 */
+  function sealGoalForm(id){
+    const g=S.getGoal(id); if(!g) return;
+    modal('先封存这一局', `
+      <p class="small muted">考完 / 交稿 / 投递之后，结果还没出来。把它温柔封存起来——这段时间军师不催你、也不派任务。等结果出来了，点「出结果了」就好。</p>
+      <div class="field mt12"><label>这次是</label>
+        <select id="seal-reason">
+          <option value="exam">考试已结束</option>
+          <option value="submit">已提交作品 / 作业</option>
+          <option value="apply">已投递简历 / 申请</option>
+          <option value="health">已就诊 / 检查</option>
+          <option value="other">其他已交付</option>
+        </select>
+      </div>
+      <div class="field"><label>预计哪天出结果（可选）</label><input id="seal-date" type="date"></div>
+      <button class="btn primary block" id="seal-save">封存起来</button>
+    `, body=>{
+      body.querySelector('#seal-save').addEventListener('click',()=>{
+        const reason=body.querySelector('#seal-reason').value;
+        const date=body.querySelector('#seal-date').value||'';
+        S.sealGoal(id, { reason, expectResultAt:date||null });
+        closeModal();
+        const tip = (reason==='exam'||reason==='submit'||reason==='apply')
+          ? '这一步你已经走完啦，先好好歇歇，结果出来再说 🤍' : '先把它轻轻放下，等结果。';
+        toast(tip); renderManual();
+      });
+    });
+  }
+  /* 出结果了：两步温柔选择（过了 / 没过；没过→拆分重来 / 调整目标 / 先缓缓） */
+  function resultFlow(id){
+    const g=S.getGoal(id); if(!g) return;
+    modal('结果出来了吗', `
+      <p class="small muted">「${esc(g.title)}」的结果，是喜是忧？军师都陪着你。</p>
+      <div class="row wrap mt12">
+        <button class="btn mint sm" id="r-pass">过了 🎉</button>
+        <button class="btn ghost sm" id="r-fail">还没过</button>
+      </div>
+    `, body=>{
+      body.querySelector('#r-pass').addEventListener('click',()=>{
+        S.resolveSealed(id,'passed');
+        closeModal();
+        toast(`「${g.title}」过了！辛苦啦，去奖励自己一下 🤍`);
+        renderManual(); updateTopbar();
+      });
+      body.querySelector('#r-fail').addEventListener('click',()=>{
+        modal('没关系，我们慢慢来', `
+          <p class="small muted">没过也不代表你没努力。军师替你想好了三种走法，挑一个最舒服的：</p>
+          <div class="reco-card" style="margin-top:10px">
+            <button class="btn block mb8" id="m-redo">🔁 拆分重来：保留目标，从头把路铺得更稳</button>
+            <button class="btn block mb8" id="m-adjust">🛠 调整目标：降一点难度，或把期限放宽些</button>
+            <button class="btn block" id="m-pause">☕ 先缓缓：这局先封存，歇一阵再战</button>
+          </div>
+        `, b2=>{
+          b2.querySelector('#m-redo').addEventListener('click',()=>{
+            S.restartGoal(id,'redo'); closeModal();
+            toast('好，我们重新铺路。复盘比硬撑更重要，明天起重新派任务。'); renderManual();
+          });
+          b2.querySelector('#m-adjust').addEventListener('click',()=>{
+            modal('调一调目标', `
+              <p class="small muted">把目标稍微调温柔一点，不是退步，是更稳地往前。</p>
+              <div class="field mt12"><label>新的目标描述</label><input id="adj-target" value="${esc(g.target||'由军师陪你达成')}"></div>
+              <div class="field"><label>现在的起点</label><input id="adj-cur" value="${esc(g.current||'')}"></div>
+              <button class="btn primary block" id="adj-save">更新并继续</button>
+            `, b3=>{
+              b3.querySelector('#adj-save').addEventListener('click',()=>{
+                S.restartGoal(id,'adjust',{ target:b3.querySelector('#adj-target').value.trim(), current:b3.querySelector('#adj-cur').value.trim() });
+                closeModal(); toast('目标已调温柔，继续走，不着急。'); renderManual();
+              });
+            });
+          });
+          b2.querySelector('#m-pause').addEventListener('click',()=>{
+            S.restartGoal(id,'pause'); closeModal();
+            toast('好，先歇一阵。想回来了，点「出结果了」随时唤醒。'); renderManual();
+          });
+        });
+      });
+    });
   }
   function inferType(t){
     if(/六级|英语|单词|听力|阅读|翻译/.test(t)) return 'cet6';
