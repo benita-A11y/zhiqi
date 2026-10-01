@@ -36,7 +36,20 @@
     longTerm:['考公','考编','进国家单位','赚大钱'],
     traits:['天秤座·犹豫需他人决断','ISFJ·负责·需外部认可','事情乱·忘下一步','目标大·难落实','碎片时间多'],
     onboarded:true,
-    dragLog:[]          // 拖拽行为学习：[ {from,to,type,ts} ]，军师据此"越用越懂你"
+    dragLog:[],         // 拖拽行为学习：[ {from,to,type,ts} ]，军师据此"越用越懂你"
+    /* 用户画像·偏好：每次编辑/自定义后由 recordEdit 自动聚合，军师据此越用越贴合你。
+       这是「先替你安排 + 再据你的习惯更好的安排」的学习底座。 */
+    prefs:{
+      avgDailyTime:null,        // 推算：你偏好的单任务时长（分钟）
+      preferredWeeklyDays:null, // 推算：你偏好每周出战几天
+      dislikedTypes:[],         // 你常删 / 调走的任务类型
+      selfAddedTypes:[],        // 你常自己加的任务类型（兴趣 / 刚需）
+      shortenStreak:0,          // 连续把时长改短的次数（精力有限信号）
+      lengthenStreak:0,         // 连续把时长加长的次数（想更拼信号）
+      edits:0,                  // 累计编辑次数
+      lastEditAt:null
+    },
+    editLog:[]           // 编辑流水：[ {kind,field,from,to,ts,goalId} ]，画像学习原料
   };
 
   /* ---------- 目标阶段模板（用于拆解展示 + 周计划生成） ---------- */
@@ -510,6 +523,20 @@
 
     merged.meta = merged.meta || {};
     merged.meta.lastSync = Math.max(lTs, rTs);
+
+    /* profile.prefs / editLog：用户画像学习跨设备也要收敛，不能互相覆盖。
+       另一端独有的学习（类型偏好、编辑流水）需并入，否则换设备就「忘了你」。 */
+    if(local.profile && remote.profile){
+      merged.profile = merged.profile || {};
+      merged.profile.prefs = _mergePrefs((other.profile && other.profile.prefs) || {}, merged.profile.prefs || {});
+      const la = (local.profile.editLog||[]), ra = (remote.profile.editLog||[]);
+      const seen = new Set(); const log = [];
+      la.concat(ra).forEach(function(e){
+        const k = (e&&e.ts) + '|' + (e&&e.field) + '|' + (e&&e.goalId);
+        if(!seen.has(k)){ seen.add(k); log.push(e); }
+      });
+      merged.profile.editLog = log.slice(-200);
+    }
     return merged;
   }
   function onCloudStatus(cb){ _cloudStatusCb = cb; }
@@ -648,7 +675,14 @@
       }
     })(st.undercover);
 
-    if(!st.profile   || typeof st.profile   !== 'object') st.profile    = seed.profile;
+    if(!st.profile   || typeof st.profile   !== 'object') st.profile    = JSON.parse(JSON.stringify(DEFAULT_PROFILE));
+    else {
+      st.profile.prefs = Object.assign(
+        { avgDailyTime:null, preferredWeeklyDays:null, dislikedTypes:[], selfAddedTypes:[], shortenStreak:0, lengthenStreak:0, edits:0, lastEditAt:null },
+        st.profile.prefs || {}
+      );
+      if(!Array.isArray(st.profile.editLog)) st.profile.editLog = [];
+    }
     if(!st.meta      || typeof st.meta      !== 'object') st.meta       = seed.meta;
     if(!st.weekFocus || typeof st.weekFocus !== 'object') st.weekFocus  = {};
     if(!st.predictShown || typeof st.predictShown !== 'object') st.predictShown = {};
@@ -679,17 +713,30 @@
     const st = load();
     for(const d in st.tasks){
       const i = st.tasks[d].findIndex(t=>t.id===id);
-      if(i>=0){ Object.assign(st.tasks[d][i], patch); save(); return st.tasks[d][i]; }
+      if(i>=0){
+        const old = st.tasks[d][i];
+        const fromDur = old.duration, fromType = old.type, fromTitle = old.title, fromGoal = old.goalId;
+        Object.assign(old, patch); save();
+        // 画像学习：记录这次自定义（改时长 / 类型 / 标题 → 军师越用越懂你）
+        if(patch.duration !== undefined)      recordEdit({ kind:'task', field:'duration', from:fromDur,    to:patch.duration }, true);
+        else if(patch.type !== undefined)    recordEdit({ kind:'task', field:'type',     from:fromType,   to:patch.type }, true);
+        else if(patch.title !== undefined)   recordEdit({ kind:'task', field:'title',    from:fromTitle,  to:patch.title }, true);
+        else if(patch.goalId !== undefined)  recordEdit({ kind:'task', field:'goalId',   from:fromGoal,   to:patch.goalId }, true);
+        return old;
+      }
     }
     return null;
   }
   function deleteTask(id){
     const st = load();
+    let removedType=null, removedTitle=null;
     for(const d in st.tasks){
       const i = st.tasks[d].findIndex(t=>t.id===id);
-      if(i>=0){ st.tasks[d].splice(i,1); save(); return true; }
+      if(i>=0){ removedType=st.tasks[d][i].type; removedTitle=st.tasks[d][i].title; st.tasks[d].splice(i,1); save(); break; }
     }
-    return false;
+    // 删掉的任务类型 → 记进「不爱做」画像（军师之后会少派 / 改换形式）
+    if(removedType) recordEdit({ kind:'task-del', field:'type', from:removedType, to:removedType }, true);
+    return removedType ? { type:removedType, title:removedTitle } : false;
   }
   function reorder(dateStr, orderedIds){
     const st = load();
@@ -791,6 +838,59 @@
   }
   function getGoal(id){ return _state.goals.find(g=>g.id===id)||null; }
   function updateGoal(id,patch){ const g=getGoal(id); if(g){Object.assign(g,patch);save();} return g; }
+  /* 编辑目标：在 updateGoal 基础上，把「你改了什么」送进画像学习。
+     这就是双轨的「自适应」那一轨——军师先替你安排，你改完，平台记住你的偏好，下次更贴合。 */
+  function editGoal(id, patch){
+    const g = getGoal(id); if(!g) return null;
+    let first = true;
+    for(const k in patch){
+      recordEdit({ kind:'goal', goalId:id, field:k, from:(g[k]!==undefined?g[k]:null), to:patch[k] }, first);
+      first = false;
+    }
+    return updateGoal(id, patch);
+  }
+  /* 画像学习：把一次编辑聚合成偏好。callers 决定 countEdit 是否计入「用户编辑次数」。 */
+  function recordEdit(edit, countEdit){
+    const p = _state && _state.profile;
+    if(!p) return;
+    p.editLog = p.editLog || [];
+    if(!p.prefs) p.prefs = { avgDailyTime:null, preferredWeeklyDays:null, dislikedTypes:[], selfAddedTypes:[], shortenStreak:0, lengthenStreak:0, edits:0, lastEditAt:null };
+    const e = Object.assign({ ts:Date.now(), kind:'goal' }, edit);
+    p.editLog.push(e);
+    if(p.editLog.length > 200) p.editLog = p.editLog.slice(-200);
+    const pr = p.prefs;
+    if(countEdit) pr.edits = (pr.edits||0) + 1;
+    pr.lastEditAt = e.ts;
+    const v = Number(e.to);
+    if((e.field==='dailyTime' || e.field==='duration') && !isNaN(v) && v>0){
+      pr.avgDailyTime = pr.avgDailyTime!=null ? Math.round(pr.avgDailyTime*0.7 + v*0.3) : v;
+      if(Number(e.from) > v){ pr.shortenStreak = (pr.shortenStreak||0)+1; pr.lengthenStreak = 0; }
+      else if(Number(e.from) < v){ pr.lengthenStreak = (pr.lengthenStreak||0)+1; pr.shortenStreak = 0; }
+    }
+    if(e.field==='weeklyDays'){
+      const w = Number(e.to);
+      if(!isNaN(w) && w>0) pr.preferredWeeklyDays = pr.preferredWeeklyDays!=null ? Math.round(pr.preferredWeeklyDays*0.7 + w*0.3) : w;
+    }
+    if(e.field==='type' && e.kind==='task'){ const t=e.to; if(t && pr.selfAddedTypes.indexOf(t)<0) pr.selfAddedTypes.push(t); }
+    if(e.field==='type' && e.kind==='task-del'){ const t=e.to; if(t && pr.dislikedTypes.indexOf(t)<0) pr.dislikedTypes.push(t); }
+    if(e.field==='goalId' && e.kind==='task' && e.to){ /* 任务挂到某目标：记录归属偏好 */ }
+    save();
+  }
+  /* 跨设备合并画像：类型取并集、计数器取较大、时长/天数取有效一端，不互相覆盖。 */
+  function _mergePrefs(a, b){
+    a = a||{}; b = b||{};
+    const union = function(x,y){ const s=(x||[]).slice(); (y||[]).forEach(function(z){ if(s.indexOf(z)<0) s.push(z); }); return s; };
+    return {
+      avgDailyTime: (b.avgDailyTime!=null? b.avgDailyTime : (a.avgDailyTime!=null? a.avgDailyTime : null)),
+      preferredWeeklyDays: (b.preferredWeeklyDays!=null? b.preferredWeeklyDays : (a.preferredWeeklyDays!=null? a.preferredWeeklyDays : null)),
+      dislikedTypes: union(a.dislikedTypes, b.dislikedTypes),
+      selfAddedTypes: union(a.selfAddedTypes, b.selfAddedTypes),
+      shortenStreak: Math.max(a.shortenStreak||0, b.shortenStreak||0),
+      lengthenStreak: Math.max(a.lengthenStreak||0, b.lengthenStreak||0),
+      edits: (a.edits||0) + (b.edits||0),
+      lastEditAt: Math.max(a.lastEditAt||0, b.lastEditAt||0)
+    };
+  }
   function advanceStage(id){
     const g=getGoal(id); if(!g) return null;
     if(g.stageIndex < g.stages.length-1){ g.stageIndex++; g.progress = goalProgressOf(g); save(); return g; }
@@ -916,7 +1016,8 @@
     uid, fmtDate, today, shiftDay, weekdayCN, weekdayShort, weekOf, INBOX, isoWeek, weekKey,
     tasksOf, ensureDate, addTask, updateTask, deleteTask, reorder, setDone, onTaskToggled,
     setTaskDate, unscheduled, pushDragLog, dragOutCount, dragInCount, getWeekFocus, setWeekFocus, setWeekSummary,
-    addGoal, getGoal, updateGoal, advanceStage, deleteGoal, typeDoneRate, sealGoal, resolveSealed, restartGoal,
+    addGoal, getGoal, updateGoal, editGoal, advanceStage, deleteGoal, typeDoneRate, sealGoal, resolveSealed, restartGoal,
+    recordEdit,
     addNote, updateNote, addDiary, pushLog,
     pushAdvice, recentAdvice, adviceLevelOf,
     KEY
