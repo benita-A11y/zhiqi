@@ -198,6 +198,7 @@
     const remainDays = Math.max(0, Math.round((1-timeRatio)*totalDays));
     let state='ontrack';
     if(g.status==='done') state='done';
+    else if(g.status==='sealed') state='sealed';   // 封存待结果：不催、不判掉队
     else if(gap >= 0.10) state='ahead';
     else if(gap <= -0.20) state='danger';
     else if(gap <= -0.08) state='behind';
@@ -321,7 +322,8 @@
       pc, risk, diff,
       goals,
       behindGoals: goals.filter(g=>g.state==='behind'||g.state==='danger'),
-      urgentGoals: goals.filter(g=>g.state!=='done' && g.remainDays<=30 && g.remainDays>0),
+      urgentGoals: goals.filter(g=>g.state!=='done' && g.state!=='sealed' && g.remainDays<=30 && g.remainDays>0),
+      sealedGoals: goals.filter(g=>g.state==='sealed' && g.expectResultAt && g.expectResultAt <= S.fmtDate(S.today())),
       streak: u.streak||0, lostDays,
       nightStreak,
       intel: u.intelFragments||0,
@@ -591,6 +593,23 @@
       goalUrgent: [
         '「{t}」还剩约 {d} 天。接下来每天需要更专注一点，我给你加了强度。',
         '「{t}」进入倒计时（{d} 天）。别怕，按我排的走，来得及。'
+      ],
+      /* 目标生命周期：封存 / 出结果（过 / 没过）—— 天秤座 ISFJ 体贴话术，不催促、不刺眼 */
+      goalSealed: [
+        '「{t}」先封存起来啦。考完/交完就别再悬着心，结果出来前，军师陪你把它轻轻放下。',
+        '「{t}」已进入等待期。这一步你已经走完了，剩下的交给时间，好好歇歇。'
+      ],
+      goalPassed: [
+        '「{t}」过了！辛苦啦，这一程你真的尽力了。去奖励自己一下——喝杯喜欢的、散个长步、或早早上床睡个好觉，都值得。',
+        '「{t}」顺利通过 🎉 你值得被好好犒劳。今天别排任务了，把时间留给自己。'
+      ],
+      goalFailed: [
+        '「{t}」这次没过，没关系。你已经认真走完了全程，这本身就很了不起。我们慢慢来，不着急。',
+        '「{t}」结果不如意，但别怪自己。复盘比硬撑更重要——要不要我陪你把路重新铺一遍？'
+      ],
+      goalSealedRemind: [
+        '「{t}」的结果应该快出了。不急，想看的时候点一下「出结果了」就好，军师一直在。',
+        '轻声提醒：「{t}」到了预计出结果的日子。慢慢来，准备好了再揭晓。'
       ]
     },
 
@@ -1003,6 +1022,12 @@
       say:c=>{ const g=c.goals.filter(x=>x.state==='ahead')[0];
         return pick(SPEECH.analysis.goalAhead, c.date+'ah'+g.goal.id)
           .replace('{t}', g.goal.title).replace('{p}', Math.round(g.progRatio*100)); } },
+
+    { id:'goalSealedRemind', pri:52,
+      when:c=> c.sealedGoals && c.sealedGoals.length>0,
+      say:c=>{ const g=c.sealedGoals[0];
+        return pick(SPEECH.analysis.goalSealedRemind, c.date+'sr'+g.goal.id)
+          .replace('{t}', g.goal.title); } },
 
     { id:'unbalanced', pri:56,
       when:c=> c.cat.list.length>=2 && c.cat.list[0].total>=5 && (c.cat.list[0].total - (c.cat.list[1]?c.cat.list[1].total:0)) >= 6,
