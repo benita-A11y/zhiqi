@@ -1164,6 +1164,297 @@
   }
 
   /* =========================================================
+     6.5 离线军师方案引擎（把「AI 能想到的所有情况」预置成代码）
+     ------------------------------------------------------------
+     思路：不联网也有强大大脑。把用户可能遇到的处境（完不成 / 拖延 /
+     卡阶段 / 熬夜 / 精力低 / 任务多 / 完美主义 / 空盘 / 中断回归 /
+     想社交 / 连胜 / 周初 / 目标不可行 / 直接提问）逐一枚举，每类给出
+     2-4 个可选方案。每个方案带一个「signal」——命中用户画像就加权，
+     「avoid」——用户不爱就降权。于是越用越贴合，越用越懂。
+     方案只产出「数据 + 排序」，真正执行交给 UI 的「采用」按钮。
+     ========================================================= */
+  const SOLUTIONS = {
+    /* —— 总完不成当天的任务 —— */
+    cantFinish: {
+      label:'今天没做完',
+      solutions:[
+        { id:'cut-time', title:'把单次时长调短一点', signal:'shorten', baseFit:0.7,
+          why:'你最近几次都把时长改短了，说明当下更想轻一点。',
+          detail:'比如把 60 分钟拆成 2 个 25 分钟，中间喘口气，完成率会高很多。',
+          apply:{ kind:'scale-daily', factor:0.6 } },
+        { id:'smaller', title:'把任务拆得更碎', signal:null, baseFit:0.6,
+          why:'一口吃不成胖子，碎一点更容易动手。',
+          detail:'一个「复习一章」拆成「看 3 节 + 做 5 题」，每步都有成就感。',
+          apply:{ kind:'split' } },
+        { id:'golden', title:'挪到你的黄金时段', signal:null, baseFit:0.55,
+          why:'难的事放在精力最好的时候，轻松的事放碎片时间。',
+          detail:'军师看你习惯，把硬骨头排在你最常搞定的那一格。',
+          apply:{ kind:'move-golden' } },
+        { id:'everyother', title:'改成隔天做', signal:null, baseFit:0.5,
+          why:'不是每件事都要每天。隔天反而能坚持更久。',
+          detail:'每周天数从 7 降到 4~5，压力小了，反而不掉链子。',
+          apply:{ kind:'scale-weekly', factor:0.65 } }
+      ]
+    },
+    /* —— 总拖延那种「大块头」任务 —— */
+    procrastinate: {
+      label:'一直在拖',
+      solutions:[
+        { id:'two-min', title:'两分钟启动法', signal:null, baseFit:0.72,
+          why:'最难的不是做，是开始。告诉自己只做两分钟。',
+          detail:'设一个 2 分钟的小任务，动起来之后，多半会继续做下去。',
+          apply:{ kind:'micro-start' } },
+        { id:'bind-habit', title:'绑到一个已有习惯上', signal:null, baseFit:0.6,
+          why:'靠「记得做」最不可靠，绑到每天必做的事才稳。',
+          detail:'比如「吃完早饭就做 1 题」，用旧习惯带新习惯。',
+          apply:{ kind:'bind-habit' } },
+        { id:'simplify', title:'先交一版凑合的', signal:null, baseFit:0.55,
+          why:'完成比完美重要，先有再改。',
+          detail:'第一版允许潦草，先跑通，后面再润色。',
+          apply:{ kind:'draft-first' } }
+      ]
+    },
+    /* —— 目标卡在某个阶段 —— */
+    stuckStage: {
+      label:'卡住了',
+      solutions:[
+        { id:'easier', title:'把这一阶段降一档难度', signal:'shorten', baseFit:0.66,
+          why:'卡住往往不是你不努力，是这步给太狠了。',
+          detail:'把阶段核心从「刷 50 题」降到「搞懂 10 题」，先透再快。',
+          apply:{ kind:'goal-easier' } },
+        { id:'longer', title:'给这个阶段多留点时间', signal:null, baseFit:0.58,
+          why:'节奏不是匀速的，卡住的格子该宽一点。',
+          detail:'把当前阶段周期拉长 1~2 周，不必硬赶。',
+          apply:{ kind:'goal-longer' } },
+        { id:'switch-path', title:'换一条路径试试', signal:null, baseFit:0.5,
+          why:'同个目标可以有很多走法，此路不通就绕。',
+          detail:'比如刷题卡住，先转去补基础或看讲解，回头再战。',
+          apply:{ kind:'goal-pivot' } },
+        { id:'seal', title:'先封存，歇一阵', signal:null, baseFit:0.45,
+          why:'不是放弃，是给脑子放假。',
+          detail:'封存起来不催你，想回来随时点「出结果了」唤醒。',
+          apply:{ kind:'goal-seal' } }
+      ]
+    },
+    /* —— 总熬夜，睡得晚 —— */
+    nightOwl: {
+      label:'又熬夜了',
+      solutions:[
+        { id:'shift-up', title:'把关键任务前移', signal:null, baseFit:0.68,
+          why:'夜里脑子转不动，硬撑效率低还伤身。',
+          detail:'重要的事放上午，晚上只留轻松的整理类。',
+          apply:{ kind:'move-morning' } },
+        { id:'winddown', title:'设一个睡前小仪式', signal:null, baseFit:0.6,
+          why:'给身体一个「该停了」的信号。',
+          detail:'固定时间关大屏、听首歌或写两句日记，慢慢把夜熬掉。',
+          apply:{ kind:'ritual' } },
+        { id:'night-light', title:'夜里只排轻量任务', signal:null, baseFit:0.55,
+          why:'晚上就别给自己上强度了。',
+          detail:'把夜间任务时长压到 15 分钟内的「顺手事」。',
+          apply:{ kind:'night-light' } }
+      ]
+    },
+    /* —— 精力低 / 状态差 —— */
+    lowEnergy: {
+      label:'今天没力气',
+      solutions:[
+        { id:'less', title:'今天少排一点', signal:'shorten', baseFit:0.7,
+          why:'状态差时硬满反而更易崩。少即是多。',
+          detail:'先保 1~2 件要紧的，其余挪到状态好的日子。',
+          apply:{ kind:'scale-daily', factor:0.5 } },
+        { id:'light', title:'换成「顺手就能做」的轻任务', signal:null, baseFit:0.6,
+          why:'低能量也有低能量的活法。',
+          detail:'整理、听读、列清单这类不费脑的，照样推进。',
+          apply:{ kind:'light-only' } },
+        { id:'rest', title:'允许自己好好歇一天', signal:null, baseFit:0.5,
+          why:'休息不是退步，是给下一局蓄力。',
+          detail:'军师陪你，今天不追进度，明天满血再来。',
+          apply:{ kind:'rest-day' } }
+      ]
+    },
+    /* —— 任务堆太多 —— */
+    tooMany: {
+      label:'事情堆成山',
+      solutions:[
+        { id:'low-commit', title:'砍到低承诺：每天只保 3 件', signal:null, baseFit:0.7,
+          why:'承诺越少，完成越稳，成就感反而多。',
+          detail:'其余进「未排程」，有空再拖进来，不挤今日。',
+          apply:{ kind:'cap-3' } },
+        { id:'prioritize', title:'按军师优先级排', signal:null, baseFit:0.62,
+          why:'不是都重要，先打最值钱的。',
+          detail:'用 priorityScore 把要紧的顶上来，琐碎的沉下去。',
+          apply:{ kind:'sort-priority' } },
+        { id:'batch', title:'把同类事批量处理', signal:null, baseFit:0.52,
+          why:'切换最费神，同类一起做更顺。',
+          detail:'回消息、跑腿、琐碎事各归一堆，一次清空。',
+          apply:{ kind:'batch' } }
+      ]
+    },
+    /* —— 完美主义卡住 —— */
+    perfectionist: {
+      label:'总想做到完美',
+      solutions:[
+        { id:'done-first', title:'先完成，再完美', signal:null, baseFit:0.72,
+          why:'完美是完成的敌人。先有毛坯，再雕。',
+          detail:'给任务加一个「先交版」节点，逼自己先跑通。',
+          apply:{ kind:'draft-first' } },
+        { id:'timebox', title:'给每件事限时', signal:null, baseFit:0.6,
+          why:'不设限，完美就无限膨胀。',
+          detail:'比如写作限时 40 分钟，到点到，下次再改。',
+          apply:{ kind:'timebox' } }
+      ]
+    },
+    /* —— 空盘，不知道干嘛 —— */
+    emptyBoard: {
+      label:'今天空空的',
+      solutions:[
+        { id:'micro', title:'先落一颗最小的子', signal:null, baseFit:0.74,
+          why:'空盘最容易发呆。随便起个头就好。',
+          detail:'挑一件 10 分钟内的小事做了，棋局就活了。',
+          apply:{ kind:'micro-start' } },
+        { id:'from-habit', title:'从你的习惯任务起', signal:null, baseFit:0.6,
+          why:'习惯最省力，用它破冰。',
+          detail:'先做那个你几乎不用想就会做的日常项。',
+          apply:{ kind:'from-habit' } },
+        { id:'plan-ahead', title:'顺手排一下明天', signal:null, baseFit:0.5,
+          why:'今天轻松，正好给明天铺路。',
+          detail:'把明天的 3 件要紧事先摆好，明天不迷路。',
+          apply:{ kind:'plan-tomorrow' } }
+      ]
+    },
+    /* —— 中断后回来 —— */
+    comeback: {
+      label:'好久没动了',
+      solutions:[
+        { id:'soft', title:'轻量重启，不补旧债', signal:null, baseFit:0.76,
+          why:'断了就断了，别为过去补课，那会压垮自己。',
+          detail:'从今天起只排 1~2 件，慢慢把节奏捡回来。',
+          apply:{ kind:'soft-restart' } },
+        { id:'one-key', title:'先抓一个关键目标', signal:null, baseFit:0.6,
+          why:'回来别贪多，一个就够。',
+          detail:'选最想推进的那条线，其他先放。',
+          apply:{ kind:'one-key' } }
+      ]
+    },
+    /* —— 想社交但没时间 —— */
+    social: {
+      label:'想出去走走',
+      solutions:[
+        { id:'bind', title:'把社交绑到已有安排', signal:null, baseFit:0.66,
+          why:'不是挤时间，是把两件事合一件。',
+          detail:'比如散步时打电话、吃饭时见朋友，一举两得。',
+          apply:{ kind:'bind-social' } },
+        { id:'micro-social', title:'来点微社交', signal:null, baseFit:0.58,
+          why:'不一定非要聚会，几句话也顶用。',
+          detail:'给朋友发句近况、评个论，连接感就有了。',
+          apply:{ kind:'micro-social' } }
+      ]
+    },
+    /* —— 连续完成，状态正盛 —— */
+    streakUp: {
+      label:'最近很稳',
+      solutions:[
+        { id:'nudge', title:'加点一点点挑战', signal:'lengthen', baseFit:0.64,
+          why:'顺的时候加一点码，进步最快。',
+          detail:'把某项目标时长 +10 分钟，或提前一个阶段。',
+          apply:{ kind:'scale-daily', factor:1.15 } },
+        { id:'keep', title:'保持节奏别猛冲', signal:null, baseFit:0.6,
+          why:'连胜最怕一下透支，稳比猛好。',
+          detail:'维持当前配置，让习惯扎下根。',
+          apply:{ kind:'keep' } }
+      ]
+    },
+    /* —— 周初，做一周规划 —— */
+    weekStart: {
+      label:'新的一周',
+      solutions:[
+        { id:'buffer', title:'留一点缓冲', signal:null, baseFit:0.68,
+          why:'周计划塞太满，周三就崩。留白才稳。',
+          detail:'每周故意空 1~2 天机动，突发也能接住。',
+          apply:{ kind:'add-buffer' } },
+        { id:'focus', title:'定一个本周重点', signal:null, baseFit:0.62,
+          why:'一周盯一件事，比撒网更出活。',
+          detail:'在「本周重点」写一句最想推进的，军师据此调优先级。',
+          apply:{ kind:'set-focus' } }
+      ]
+    },
+    /* —— 目标看起来不可行 —— */
+    goalInfeasible: {
+      label:'这目标有点悬',
+      solutions:[
+        { id:'rereal', title:'重新估一下目标', signal:null, baseFit:0.7,
+          why:'不是你不行，是目标可能定飘了。',
+          detail:'把「425 分」先拆成「先稳 400」，台阶矮一点。',
+          apply:{ kind:'goal-rereal' } },
+        { id:'phases', title:'多铺几级台阶', signal:null, baseFit:0.6,
+          why:'大目标要更多小阶段才走得动。',
+          detail:'把阶段从 3 级加到 5 级，每级更轻。',
+          apply:{ kind:'goal-phases' } }
+      ]
+    },
+    /* —— 用户直接提问（兜底综合） —— */
+    ask: {
+      label:'你问军师',
+      solutions:[
+        { id:'look', title:'先看看你现在的盘面', signal:null, baseFit:0.6,
+          why:'不急着给答案，先看清楚局势。',
+          detail:'军师按你的完成率、精力、目标进度，挑最该动的一手。',
+          apply:{ kind:'show-brief' } },
+        { id:'one-step', title:'只给今天最重要的一步', signal:null, baseFit:0.66,
+          why:'想太多会乱，先走一步。',
+          detail:'把今天最值钱的那件事摆出来，做完再说。',
+          apply:{ kind:'one-step' } },
+        { id:'tune', title:'按你的习惯调一调安排', signal:null, baseFit:0.58,
+          why:'你的偏好军师都记着，调过的更贴合。',
+          detail:'用你常改的时长 / 每周天数，重新铺近一周。',
+          apply:{ kind:'retune' } }
+      ]
+    }
+  };
+
+  /* 用户提问 → 处境分类（离线关键词意图识别） */
+  function classifyAsk(text){
+    const t = (text||'').toLowerCase();
+    const has = function(arr){ return arr.some(function(k){ return t.indexOf(k) >= 0; }); };
+    if(has(['完不成','做不完','没做完','来不及','太多做','根本做'])) return 'cantFinish';
+    if(has(['拖延','一直拖','懒','不想动','提不起'])) return 'procrastinate';
+    if(has(['卡住','卡在','瓶颈','没进展','停滞','不动了'])) return 'stuckStage';
+    if(has(['熬夜','睡得晚','失眠','晚睡','半夜'])) return 'nightOwl';
+    if(has(['没力气','累','疲惫','状态差','没精神',' Low'.toLowerCase(),'低落','能量低'])) return 'lowEnergy';
+    if(has(['太多','堆成山','事情多','忙不过','排满','塞满'])) return 'tooMany';
+    if(has(['完美','较真','纠结','吹毛','细节','总想做到'])) return 'perfectionist';
+    if(has(['不知道','空','没事做','干啥','闲','发呆','无聊'])) return 'emptyBoard';
+    if(has(['好久','断','没动','荒废','回来','拾起','捡起'])) return 'comeback';
+    if(has(['社交','朋友','孤单','见人','聚会','出去走走','想找人说话'])) return 'social';
+    if(has(['连胜','连续','稳定','坚持','每天都在','很顺'])) return 'streakUp';
+    if(has(['一周','周计划','这周','下周','规划','安排这周'])) return 'weekStart';
+    if(has(['不可行','悬','做不到','太难','飘','目标大','落实不了'])) return 'goalInfeasible';
+    return 'ask';
+  }
+
+  /* 产出方案：按用户画像排序（越贴合越靠前） */
+  function propose(kind, ctx){
+    const sit = SOLUTIONS[kind] || SOLUTIONS.ask;
+    const prefs = (ctx && ctx.profile && ctx.profile.prefs) || {};
+    const sig = {
+      shorten:  (prefs.shortenStreak||0) >= 2,
+      lengthen: (prefs.lengthenStreak||0) >= 2,
+      dislikes: prefs.dislikedTypes || [],
+      selfAdded: prefs.selfAddedTypes || [],
+      weeklyDays: prefs.preferredWeeklyDays,
+      avgTime: prefs.avgDailyTime
+    };
+    const out = (sit.solutions || []).map(function(s){
+      let fit = s.baseFit != null ? s.baseFit : 0.6;
+      if(s.signal && sig[s.signal]) fit += 0.28;       // 命中你的习惯 → 更贴合
+      if(s.avoid && sig.dislikes.indexOf(s.avoid) >= 0) fit -= 0.25;  // 你不爱 → 降权
+      return Object.assign({ fit: Math.max(0.1, Math.min(1, Math.round(fit*100)/100)) }, s);
+    });
+    out.sort(function(a,b){ return b.fit - a.fit; });
+    return { kind: sit.label, solutions: out };
+  }
+
+  /* =========================================================
      7. 导出
      ========================================================= */
   window.ZQ = window.ZQ || {};
@@ -1178,6 +1469,8 @@
     /* 调度与输出 */
     scan, brief, moveLine, metrics,
     LINES, DETECTORS, REVIEW_GAPS,
-    pick, fill
+    pick, fill,
+    // 离线方案引擎（把 AI 推演的所有可能预置成代码）
+    SOLUTIONS, propose, classifyAsk
   };
 })();
