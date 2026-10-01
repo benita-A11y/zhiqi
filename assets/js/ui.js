@@ -473,10 +473,11 @@
             ${g.stageIndex<g.stages.length-1?`<button class="btn ghost sm" data-advance="${g.id}">推进到下一阶段</button>`:''}
             <button class="btn mint sm" data-complete="${g.id}">完成目标</button>
             <button class="btn ghost sm" data-seal="${g.id}">封存待结果</button>
+            <button class="btn ghost sm" data-editgoal="${g.id}">✎ 编辑</button>
             <button class="btn ghost sm danger" data-delgoal="${g.id}">删除目标</button>
           </div>`;
       } else {
-        actionRow = `<div class="row wrap mt12"><button class="btn ghost sm danger" data-delgoal="${g.id}">删除目标</button></div>`;
+        actionRow = `<div class="row wrap mt12"><button class="btn ghost sm" data-editgoal="${g.id}">✎ 编辑</button><button class="btn ghost sm danger" data-delgoal="${g.id}">删除目标</button></div>`;
       }
       return `
       <div class="card goal-card ${isSealed?'sealed':''}" style="border-left-color:${g.color}">
@@ -541,6 +542,7 @@
       const [title,cat,weekly]=x.dataset.addreco.split('|');
       addRecommendedGoal(title,cat,weekly);
     }));
+    view.querySelectorAll('[data-editgoal]').forEach(x=>x.addEventListener('click',()=>editGoalForm(x.dataset.editgoal)));
   }
 
   function addGoalForm(){
@@ -567,6 +569,44 @@
           stages:defaultStages()
         });
         closeModal(); toast('已拆解，明天起自动派发任务'); renderManual(); updateTopbar();
+      });
+    });
+  }
+  /* 编辑目标：所有字段都可改（标题/类别/现状/目标/时长/每周天数/资源/阶段）。
+     保存走 S.editGoal —— 军师会把你改的每一条送进画像学习，下次安排更贴合你。 */
+  function editGoalForm(id){
+    const g=S.getGoal(id); if(!g) return;
+    const stageText=(g.stages||[]).map(s=>s.name).join(' / ');
+    modal('编辑目标 · '+esc(g.title),`
+      <p class="small muted">任何字段都能改。你改的每一条，军师都会默默记下来，越改越懂你 ♟️</p>
+      <div class="field mt12"><label>名称</label><input id="e-title" value="${esc(g.title)}"></div>
+      <div class="field"><label>类别</label><input id="e-cat" value="${esc(g.category||'')}"></div>
+      <div class="field"><label>现状</label><input id="e-cur" value="${esc(g.current||'')}"></div>
+      <div class="field"><label>目标</label><input id="e-tar" value="${esc(g.target||'')}"></div>
+      <div class="field-row">
+        <div class="field"><label>每天可用时间(分钟)</label><input id="e-time" type="number" value="${g.dailyTime||30}"></div>
+        <div class="field"><label>每周天数</label><input id="e-days" type="number" value="${g.weeklyDays||5}"></div>
+      </div>
+      <div class="field"><label>资源</label><input id="e-res" value="${esc(g.resources||'')}"></div>
+      <div class="field"><label>阶段(用 / 分隔)</label><input id="e-stages" value="${esc(stageText)}" placeholder="如：基础 / 突破 / 实战"></div>
+      <button class="btn primary block" id="e-save-goal">保存修改</button>
+    `,body=>{
+      body.querySelector('#e-save-goal').addEventListener('click',()=>{
+        const title=body.querySelector('#e-title').value.trim();
+        if(!title){ toast('名称得写点什么'); return; }
+        const stages=body.querySelector('#e-stages').value.split('/').map(s=>s.trim()).filter(Boolean)
+          .map(n=>({ name:n, weeks:'', core:'' }));
+        S.editGoal(id,{
+          title,
+          category: body.querySelector('#e-cat').value.trim()||'自定义目标',
+          current: body.querySelector('#e-cur').value.trim(),
+          target: body.querySelector('#e-tar').value.trim(),
+          dailyTime: Math.max(1, +body.querySelector('#e-time').value||30),
+          weeklyDays: Math.max(1, Math.min(7, +body.querySelector('#e-days').value||5)),
+          resources: body.querySelector('#e-res').value.trim()||'—',
+          stages: stages.length? stages : defaultStages()
+        });
+        closeModal(); toast('已更新，军师会据此重新琢磨怎么帮你 🤍'); renderManual(); updateTopbar();
       });
     });
   }
@@ -751,6 +791,51 @@
     `;
     bindNotes();
   }
+  /* —— 离线方案引擎的 UI 支撑 —— */
+  // 选出「最该被调」的那个目标（先挑掉队/危险的，没有就取第一个进行中的）
+  function topGoal(){
+    try{
+      const hs = window.ZQ.brain.allGoalHealth();
+      const behind = hs.find(g=>g.state==='behind'||g.state==='danger');
+      if(behind) return S.getGoal(behind.goal.id);
+    }catch(e){}
+    return S.load().goals.find(g=>g.status==='active') || null;
+  }
+  // 采用某方案：能落到数据的就直接改，落不到的就把思路记进画像（越用越贴合）
+  function applySolution(sol){
+    const k = sol && sol.apply && sol.apply.kind;
+    const st = S.load();
+    const actives = st.goals.filter(g=>g.status==='active' || g.status==='sealed');
+    const factor = (sol.apply && sol.apply.factor) || 0.6;
+    if(k==='scale-daily'){
+      actives.forEach(g=>{ if(g.dailyTime) S.editGoal(g.id,{ dailyTime: Math.max(5, Math.round(g.dailyTime*factor)) }); });
+      toast('已按这个思路，把每天时长调轻了一点 🤍'); renderManual();
+    } else if(k==='scale-weekly'){
+      actives.forEach(g=>{ if(g.weeklyDays) S.editGoal(g.id,{ weeklyDays: Math.max(3, Math.round(g.weeklyDays*factor)) }); });
+      toast('每周出战天数也松了一档'); renderManual();
+    } else if(k==='add-buffer'){
+      actives.forEach(g=>{ if(g.weeklyDays>3) S.editGoal(g.id,{ weeklyDays: g.weeklyDays-1 }); });
+      toast('每周留了点缓冲，突发也能接住'); renderManual();
+    } else if(k==='cap-3'){
+      const t = S.tasksOf(S.fmtDate(S.today()));
+      t.slice(3).forEach(x=> S.setTaskDate(x.id, 'INBOX'));
+      toast('今天只保 3 件要紧的，其余挪到未排程'); renderToday();
+    } else if(['goal-easier','goal-longer','goal-pivot','goal-rereal','goal-phases'].indexOf(k)>=0){
+      const g = topGoal();
+      if(g) editGoalForm(g.id);
+      else toast('先去谋局立个目标，军师再帮你调');
+    } else {
+      // 其余是「思路 / 习惯」类：采用即记进偏好，下次自动安排更往这靠
+      recordPrefSignal(sol);
+      toast('军师记下这个思路了，之后安排会往这靠 🤍');
+    }
+  }
+  // 把用户采用的方案信号写进画像学习（缩短/加长倾向等），闭环「越用越懂」
+  function recordPrefSignal(sol){
+    if(!sol) return;
+    const sig = sol.signal==='shorten' ? 'dailyTime' : (sol.signal==='lengthen' ? 'dailyTime' : null);
+    S.recordEdit({ kind:'pref', field: sig||'signal', from:null, to: sol.signal||sol.id }, true);
+  }
   function bindNotes(){
     // 军师会客厅 · 提问：意图识别 → 调算法 → 用数据回答（全程离线）
     const doAsk=(q)=>{
@@ -763,8 +848,41 @@
       const box=$('#ask-answer');
       if(!box) return;
       box.hidden=false;
-      box.innerHTML=`<div class="aa-q">${esc(text)}</div>
+      let html=`<div class="aa-q">${esc(text)}</div>
         <div class="aa-a">${esc(ans&&ans.text? ans.text : '这个我还没学会。换个问法试试，比如「我今天该先做什么」。')}</div>`;
+      // 离线方案引擎：把「AI 推演的所有可能」摆出来供你挑（双轨里的「自适应」一轨）
+      let sols=[];
+      try{
+        const M=window.ZQ.mind;
+        const kind=M.classifyAsk(text);
+        const pr=M.propose(kind, { profile: S.load().profile });
+        if(pr && pr.solutions && pr.solutions.length){
+          sols=pr.solutions;
+          html+=`<div class="sol-head">军师替你想了几手（挑一个最舒服的）：</div><div class="sol-list">`;
+          pr.solutions.forEach((s,idx)=>{
+            html+=`<div class="sol-card">
+              <div class="sol-title">${idx+1}. ${esc(s.title)} <span class="sol-fit">贴合度 ${Math.round(s.fit*100)}%</span></div>
+              <div class="sol-why">${esc(s.why)}</div>
+              <div class="sol-detail">${esc(s.detail)}</div>
+              <div class="sol-actions">
+                <button class="btn mint xs" data-apply="${idx}">采用</button>
+                <button class="btn ghost xs" data-tune="${idx}">调整</button>
+                <button class="btn ghost xs" data-later="${idx}">先放着</button>
+              </div></div>`;
+          });
+          html+=`</div>`;
+        }
+      }catch(e){ /* 方案引擎异常不影响主回答 */ }
+      box.innerHTML=html;
+      // 绑定方案卡片按钮
+      box.querySelectorAll('[data-apply]').forEach(b=>b.addEventListener('click',()=>{ const s=sols[+b.dataset.apply]; if(s) applySolution(s); }));
+      box.querySelectorAll('[data-tune]').forEach(b=>b.addEventListener('click',()=>{
+        const s=sols[+b.dataset.tune];
+        const g=topGoal();
+        if(g) editGoalForm(g.id);
+        else { if(window.ZQ.app && window.ZQ.app.goView) window.ZQ.app.goView('manual'); toast('去谋局里改你想改的目标'); }
+      }));
+      box.querySelectorAll('[data-later]').forEach(b=>b.addEventListener('click',()=>{ toast('先记着，想用随时找军师'); }));
       inp.value='';
     };
     const ab=$('#ask-btn');      if(ab) ab.addEventListener('click',()=>doAsk());
