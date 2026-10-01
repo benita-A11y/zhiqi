@@ -374,7 +374,7 @@
       tomorrow: forecastDay(tm),
       week: forecastWeek(),
       streak: forecastStreak(),
-      goals: S.load().goals.filter(g=>g.status!=='done').map(forecastGoal),
+      goals: S.load().goals.filter(g=>g.status==='active').map(forecastGoal),
       energy: energyModel(),
       load: loadIndex()
     };
@@ -461,7 +461,7 @@
     const loc = canonLoc(raw);
     const lib = BYWAY_LIB[loc] || [];
     const st = S.load();
-    const goals = st.goals.filter(g=> g.status!=='done');
+    const goals = st.goals.filter(g=> g.status==='active');
     const hist = taskHistoryMap();
     const todayStr = S.fmtDate(S.today());
     const todayTitles = S.tasksOf(todayStr).map(t=> normTitle(t.title));
@@ -978,7 +978,7 @@
     // 下一周的周一
     const nextMon = S.shiftDay(base, mondayOffset + 7);
     const wp = weekdayProfile(28);
-    const goals = S.load().goals.filter(g=> g.status!=='done');
+    const goals = S.load().goals.filter(g=> g.status==='active');
 
     // ① 目标配额：掉队的、会延期的目标多分配几天
     const fg = goals.map(forecastGoal).filter(Boolean);
