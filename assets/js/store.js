@@ -562,7 +562,16 @@
         g.stages = [{ name:'起步', weeks:4, core:'打基础' }];
       }
       g.stageIndex = safeInt(g.stageIndex, 0, Math.max(0, g.stages.length - 1), 0);
-      g.status     = (g.status === 'done') ? 'done' : 'active';
+      /* 状态机：active 进行中 / sealed 封存待结果（考完/交稿/投递后结果未出）/ done 完成。
+         旧数据只有 active/done，这里把非法值兜底回 active，sealed 等保留。 */
+      g.status     = (g.status === 'active' || g.status === 'sealed' || g.status === 'done') ? g.status : 'active';
+      /* 封存相关字段：reason 仅允许白名单；日期必须是 YYYY-MM-DD；数值必须是 number */
+      g.sealReason = (g.sealReason==='exam'||g.sealReason==='submit'||g.sealReason==='apply'||g.sealReason==='health'||g.sealReason==='other') ? g.sealReason : null;
+      g.sealAt     = (typeof g.sealAt === 'number') ? g.sealAt : null;
+      g.expectResultAt = (typeof g.expectResultAt==='string' && /^\d{4}-\d{2}-\d{2}$/.test(g.expectResultAt)) ? g.expectResultAt : null;
+      g.result     = (g.result==='passed'||g.result==='failed') ? g.result : null;
+      g.resultAt   = (typeof g.resultAt === 'number') ? g.resultAt : null;
+      g.paused     = !!g.paused;
       g.progress   = goalProgressOf(g);     // ← 回填：阶段推进后进度必须跟着走
       g.totalTasksDone  = safeInt(g.totalTasksDone, 0, 1e9, 0);
       g.weeklyTasksDone = safeInt(g.weeklyTasksDone, 0, 1e9, 0);
@@ -799,6 +808,62 @@
     save();
   }
 
+  /* ---------- 目标生命周期：封存 / 出结果 / 再来 ---------- */
+  // 考完试、交完稿、投完简历……结果还没出来时，把目标温柔地「封存」起来。
+  // 封存期间：不派发周任务、不判掉队、军师不唠叨；可记预计出结果日，到点温和提醒一次。
+  function sealGoal(id, opts){
+    const g = getGoal(id); if(!g) return null;
+    const o = opts || {};
+    g.status = 'sealed';
+    g.sealReason = (o.reason==='exam'||o.reason==='submit'||o.reason==='apply'||o.reason==='health'||o.reason==='other') ? o.reason : 'other';
+    g.sealAt = Date.now();
+    g.expectResultAt = (typeof o.expectResultAt==='string' && /^\d{4}-\d{2}-\d{2}$/.test(o.expectResultAt)) ? o.expectResultAt : null;
+    g.result = null; g.resultAt = null; g.paused = false;
+    g.progress = goalProgressOf(g);
+    save(); return g;
+  }
+  // 出结果了：passed → 直接完成（军师给奖励提示）；failed → 保留封存，由 UI 弹「再来」选择
+  function resolveSealed(id, outcome){
+    const g = getGoal(id); if(!g || g.status!=='sealed') return null;
+    if(outcome === 'passed'){
+      g.status = 'done'; g.result = 'passed'; g.resultAt = Date.now();
+      g.progress = goalProgressOf(g); save();
+      return { goal:g, outcome:'passed' };
+    }
+    if(outcome === 'failed'){
+      g.result = 'failed'; g.resultAt = Date.now(); g.paused = false; save();
+      return { goal:g, outcome:'failed' };
+    }
+    return null;
+  }
+  // 没过之后的三种温柔选择：redo 拆分重来 / adjust 调整目标（降难度或延长期限）/ pause 先缓缓
+  function restartGoal(id, mode, patch){
+    const g = getGoal(id); if(!g) return null;
+    if(mode === 'redo'){
+      g.stageIndex = 0; g.status = 'active';
+      g.result = null; g.resultAt = null; g.paused = false;
+      g.sealReason = null; g.sealAt = null; g.expectResultAt = null;
+      g.progress = goalProgressOf(g); save(); return g;
+    }
+    if(mode === 'adjust'){
+      if(patch && typeof patch==='object'){
+        if(patch.target!==undefined) g.target = safeText(patch.target, 80) || g.target;
+        if(patch.current!==undefined) g.current = safeText(patch.current, 80) || g.current;
+        if(Array.isArray(patch.stages) && patch.stages.length) g.stages = patch.stages;
+      }
+      g.status = 'active';
+      g.result = null; g.resultAt = null; g.paused = false;
+      g.sealReason = null; g.sealAt = null; g.expectResultAt = null;
+      g.stageIndex = Math.min(Math.max(g.stageIndex|0,0), Math.max(0,(g.stages||[]).length-1));
+      g.progress = goalProgressOf(g); save(); return g;
+    }
+    if(mode === 'pause'){
+      g.status = 'sealed'; g.sealReason = 'pause'; g.paused = true;
+      g.progress = goalProgressOf(g); save(); return g;
+    }
+    return g;
+  }
+
   /* ---------- 随记 / 日记 ---------- */
   function addNote(n){
     const st = load();
@@ -851,7 +916,7 @@
     uid, fmtDate, today, shiftDay, weekdayCN, weekdayShort, weekOf, INBOX, isoWeek, weekKey,
     tasksOf, ensureDate, addTask, updateTask, deleteTask, reorder, setDone, onTaskToggled,
     setTaskDate, unscheduled, pushDragLog, dragOutCount, dragInCount, getWeekFocus, setWeekFocus, setWeekSummary,
-    addGoal, getGoal, updateGoal, advanceStage, deleteGoal, typeDoneRate,
+    addGoal, getGoal, updateGoal, advanceStage, deleteGoal, typeDoneRate, sealGoal, resolveSealed, restartGoal,
     addNote, updateNote, addDiary, pushLog,
     pushAdvice, recentAdvice, adviceLevelOf,
     KEY
